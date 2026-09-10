@@ -1,0 +1,63 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wetter"
+version = "0.1.0"
+description = "Offline-First Wetterstation: Ingest, DWD-Bootstrap, Vorhersage"
+requires-python = ">=3.12"
+dependencies = [
+    "psycopg[binary]>=3.2",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "paho-mqtt>=2.1",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "numpy>=2.1",
+    "pandas>=2.2",
+    "scikit-learn>=1.5",
+    "lightgbm>=4.5",
+    "httpx>=0.27",
+    "pyarrow>=18.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "ruff>=0.7", "pytest-asyncio>=0.24"]
+
+[project.scripts]
+wetter-ingest = "wetter.ingest.__main__:main"
+wetter-worker = "wetter.worker.__main__:main"
+wetter-api = "wetter.api.__main__:main"
+wetter-cli = "wetter.cli:main"
+
+[tool.setuptools]
+# Flaches Layout wie in lightshow/host: die Tests laufen mit cwd = server/.
+packages = [
+    "wetter",
+    "wetter.ingest",
+    "wetter.dwd",
+    "wetter.features",
+    "wetter.models",
+    "wetter.verify",
+    "wetter.api",
+    "wetter.worker",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 90
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "BLE"]
+# RUF001-003: deutsche Umlaute und Anfuehrungszeichen in Kommentaren sind gewollt.
+ignore = ["RUF001", "RUF002", "RUF003"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["error::DeprecationWarning:wetter.*"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["wetter"]
