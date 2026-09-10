@@ -43,6 +43,7 @@ packages = [
     "wetter.models",
     "wetter.verify",
     "wetter.api",
+    "wetter.db",
     "wetter.worker",
 ]
 
