@@ -29,9 +29,16 @@ Meeresniveau, Taupunkt, Windkomponenten — dient genau diesem Zweck.
 | Baselines (Persistenz, Klimatologie, Zambretti) | fertig |
 | Verifikation (Brier, BSS, CRPS, Zuverlässigkeit) | fertig |
 | Training (LightGBM: Regen + Temperatur) | fertig, Güte gemessen |
+| Datenbank (9 Tabellen, Alembic) | fertig, gegen Postgres 17 geprüft |
+| Sensorzustände und Testmodus | fertig |
+| MQTT-Ingest mit Plausibilitätsprüfung | fertig, Ende zu Ende geprüft |
 | Firmware: Ringpuffer, Windfahne | fertig, 22 Host-Tests |
-| Firmware: Sensoren, MQTT, Energieverwaltung | offen |
-| Datenbank, Ingest, PWA, Deployment | offen |
+| Firmware: Sensortreiber, MQTT, Energieverwaltung | offen |
+| Stundenaggregation, Inferenz-Takt, Re-Training | offen |
+| PWA und Deployment | offen |
+
+**104 Tests** im Server (11 davon gegen echtes Postgres), **22 Host-Tests** in der
+Firmware, alles in der CI.
 
 ## Gemessene Güte
 
