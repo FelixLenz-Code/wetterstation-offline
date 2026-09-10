@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  server:
+    name: Server (ruff + pytest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Abhängigkeiten installieren
+        working-directory: server
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[dev]'
+
+      - name: Lint
+        working-directory: server
+        run: ruff check wetter/ tests/
+
+      # Die Tests laufen bewusst ohne Netz: die Meteorologie wird gegen eine
+      # eingefrorene DWD-Fixture geprüft, nicht gegen den Live-Server. Sonst
+      # würde eine Wartung beim DWD die CI rot färben.
+      - name: Tests
+        working-directory: server
+        run: python -m pytest tests/ -q
+
+  firmware:
+    name: Firmware-Logik (Host-Tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ringpuffer, Windfahne und die Rechenteile sind bewusst frei von
+      # ESP-Abhängigkeiten und brauchen deshalb kein ESP-IDF in der CI.
+      - name: Tests bauen und ausführen
+        working-directory: firmware/tests
+        run: make check
