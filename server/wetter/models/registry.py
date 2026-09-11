@@ -155,6 +155,10 @@ def save_temp_model(
                 "lead_hours": model.lead_hours,
                 "quantiles": sorted(model.boosters),
                 "feature_names": list(model.feature_names),
+                # Ohne die Aufweitung waere das geladene Modell selbstbewusster als
+                # das trainierte -- das Band fiele nach einem Neustart wieder
+                # zusammen.
+                "conformal_width": model.conformal_width,
             },
             indent=2,
         ),
@@ -238,6 +242,7 @@ def load_temp_model(session: Session, model_id: int) -> TempModel:
         boosters=boosters,
         feature_names=list(row.feature_names),
         metrics=dict(row.metrics or {}),
+        conformal_width=float(meta.get("conformal_width", 0.0)),
     )
     _cache_put(model_id, modell)
     return modell

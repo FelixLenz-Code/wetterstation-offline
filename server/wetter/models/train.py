@@ -78,11 +78,27 @@ class TempModel:
     boosters: dict[float, lgb.Booster]
     feature_names: list[str]
     metrics: dict[str, float] = field(default_factory=dict)
+    conformal_width: float = 0.0
+    """Aufweitung des Bandes in Kelvin, damit es wirklich so oft trifft wie
+    versprochen. Siehe :func:`conformal_width`."""
 
     def predict(self, features: pd.DataFrame) -> dict[float, np.ndarray]:
         x = features[self.feature_names]
-        roh = {q: np.asarray(b.predict(x), dtype=float) for q, b in self.boosters.items()}
-        return _sort_quantiles(roh)
+        roh = {
+            q: np.asarray(b.predict(x), dtype=float) for q, b in self.boosters.items()
+        }
+        sortiert = _sort_quantiles(roh)
+        if self.conformal_width <= 0.0:
+            return sortiert
+
+        # Nur die Bandgrenzen aufweiten, den Median nicht verschieben: er ist die
+        # beste Punktschaetzung und wird durch die Aufweitung nicht besser.
+        qs = sorted(sortiert)
+        unten, oben = qs[0], qs[-1]
+        out = dict(sortiert)
+        out[unten] = sortiert[unten] - self.conformal_width
+        out[oben] = sortiert[oben] + self.conformal_width
+        return out
 
 
 def _sort_quantiles(werte: dict[float, np.ndarray]) -> dict[float, np.ndarray]:
@@ -149,6 +165,49 @@ def train_rain_model(
     )
 
 
+def conformal_width(
+    lower: np.ndarray,
+    upper: np.ndarray,
+    observed: np.ndarray,
+    *,
+    coverage: float = 0.8,
+) -> float:
+    """Berechnet, um wieviel das Band aufgeweitet werden muss.
+
+    Quantilregression liefert Baender, die auf den Trainingsdaten passen und auf
+    neuen Daten regelmaessig zu eng sind -- das Modell ist selbstbewusster, als es
+    sein darf. Gemessen an einem vollen Durchlauf deckte ein 10-bis-90-Prozent-Band
+    nur 51 statt 80 Prozent der Faelle ab. Ein Band, das seine eigene Zusage um 30
+    Punkte verfehlt, ist schlimmer als gar keines: es sieht nach Wissen aus.
+
+    Das Verfahren ist die konformalisierte Quantilregression nach Romano, Patterson
+    und Candes (2019). Auf einem Abschnitt, den die Modelle nicht zum Lernen gesehen
+    haben, wird je Fall gemessen, wie weit die Beobachtung aus dem Band herausragt:
+
+        E = max(untere Grenze - Beobachtung, Beobachtung - obere Grenze)
+
+    Negative Werte heissen, die Beobachtung lag bequem innerhalb. Das passende
+    empirische Quantil dieser Abstaende ist die gesuchte Aufweitung. Die daraus
+    folgende Abdeckung gilt garantiert und ohne Annahme ueber die Verteilung --
+    vorausgesetzt, der Kalibrierabschnitt aehnelt dem spaeteren Betrieb.
+
+    Ein negatives Ergebnis wird auf null gesetzt: ein zu weites Band wieder
+    einzuengen waere zwar erlaubt, aber die Abdeckung ist die Zusage, die zaehlt.
+    """
+    gueltig = np.isfinite(lower) & np.isfinite(upper) & np.isfinite(observed)
+    if gueltig.sum() < 100:
+        return 0.0
+
+    lo, hi, y = lower[gueltig], upper[gueltig], observed[gueltig]
+    abstand = np.maximum(lo - y, y - hi)
+
+    n = len(abstand)
+    # Die Korrektur um (n+1)/n ist der Kern der endlichen Garantie: sie sorgt
+    # dafuer, dass die Zusage auch bei kleinem Kalibrierabschnitt haelt.
+    rang = min(1.0, np.ceil((n + 1) * coverage) / n)
+    return float(max(0.0, np.quantile(abstand, rang)))
+
+
 def train_temp_model(
     features: pd.DataFrame,
     target: pd.Series,
@@ -169,6 +228,15 @@ def train_temp_model(
     if not len(x_tr) or not len(x_ca):
         raise ValueError(f"zu wenige Daten fuer temp_at_{lead_hours}h")
 
+    # Der Kalibrierabschnitt wird geteilt: die erste Haelfte steuert das fruehe
+    # Stoppen, die zweite bleibt fuer die konformale Aufweitung unberuehrt. Beides
+    # auf denselben Daten zu machen hiesse, die Aufweitung auf Daten zu messen, an
+    # denen die Modelle bereits ausgerichtet wurden -- das Band fiele wieder zu eng
+    # aus, also genau der Fehler, den die Aufweitung beheben soll.
+    mitte = len(x_ca) // 2
+    x_stop, y_stop = x_ca.iloc[:mitte], y_ca[:mitte]
+    x_konf, y_konf = x_ca.iloc[mitte:], y_ca[mitte:]
+
     boosters: dict[float, lgb.Booster] = {}
     for q in quantiles:
         p = {**LGB_DEFAULTS, "objective": "quantile", "alpha": q, "metric": "quantile"}
@@ -177,11 +245,30 @@ def train_temp_model(
             p,
             lgb.Dataset(x_tr, label=y_tr, feature_name=namen),
             num_boost_round=num_boost_round,
-            valid_sets=[lgb.Dataset(x_ca, label=y_ca, feature_name=namen)],
+            valid_sets=[lgb.Dataset(x_stop, label=y_stop, feature_name=namen)],
             callbacks=[lgb.early_stopping(early_stopping_rounds, verbose=False)],
         )
 
-    return TempModel(lead_hours=lead_hours, boosters=boosters, feature_names=namen)
+    modell = TempModel(lead_hours=lead_hours, boosters=boosters, feature_names=namen)
+
+    qs = sorted(quantiles)
+    abdeckung = qs[-1] - qs[0]
+    roh = modell.predict(x_konf)
+    breite = conformal_width(roh[qs[0]], roh[qs[-1]], y_konf, coverage=abdeckung)
+    modell.conformal_width = breite
+    modell.metrics = {
+        "conformal_width": breite,
+        "conformal_samples": len(x_konf),
+        "nominal_coverage": abdeckung,
+    }
+    if breite > 0:
+        log.info(
+            "Temperaturmodell %d h: Band um %.2f K aufgeweitet (%d Faelle)",
+            lead_hours,
+            breite,
+            len(x_konf),
+        )
+    return modell
 
 
 def feature_importance(booster: lgb.Booster, *, top: int = 15) -> list[tuple[str, float]]:
