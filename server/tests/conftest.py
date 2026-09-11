@@ -23,12 +23,35 @@ from wetter.db.models import SCHEMA, Base
 
 TEST_URL_ENV = "WETTER_TEST_DATABASE_URL"
 
+#: Die Sitzungs-Fixture leert vor jedem Test alle Tabellen. Zeigt sie versehentlich
+#: auf eine Datenbank mit echten Daten, ist die Messreihe weg -- und zwar ohne
+#: Rückfrage und ohne dass irgendetwas nach einem Fehler aussieht.
+#:
+#: Das ist keine theoretische Sorge: beim Entwickeln hat genau das einmal einem
+#: laufenden Experiment die 272.000 importierten DWD-Stunden unter den Füßen
+#: weggezogen. Deshalb muss der Datenbankname erkennbar eine Testdatenbank
+#: bezeichnen.
+TEST_DB_MARKER = ("test", "ci", "tmp")
+
+
+def _ist_testdatenbank(url: str) -> bool:
+    name = url.rsplit("/", 1)[-1].split("?")[0].lower()
+    return any(m in name for m in TEST_DB_MARKER)
+
 
 @pytest.fixture(scope="session")
 def engine():
     url = os.environ.get(TEST_URL_ENV)
     if not url:
         pytest.skip(f"{TEST_URL_ENV} nicht gesetzt -- Datenbanktests uebersprungen")
+    if not _ist_testdatenbank(url):
+        pytest.fail(
+            f"{TEST_URL_ENV} zeigt auf die Datenbank "
+            f"{url.rsplit('/', 1)[-1]!r}. Die Tests leeren vor jedem Lauf alle "
+            f"Tabellen -- der Name muss deshalb erkennbar eine Testdatenbank "
+            f"bezeichnen (einer von {', '.join(TEST_DB_MARKER)})."
+        )
+
     eng = create_engine(url, future=True)
     try:
         with eng.connect() as con:

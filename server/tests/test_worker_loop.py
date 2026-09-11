@@ -27,6 +27,7 @@ from wetter.features.targets import build_targets
 from wetter.models.registry import (
     STATUS_SHADOW,
     active_model,
+    clear_cache,
     list_models,
     load_rain_model,
     missing_features,
@@ -86,6 +87,19 @@ def kunstwetter() -> pd.DataFrame:
         },
         index=idx,
     )
+
+
+@pytest.fixture(autouse=True)
+def frischer_zwischenspeicher():
+    """Der Modell-Zwischenspeicher darf nicht über Tests hinweg wirken.
+
+    Die Tabellen werden zwischen den Tests geleert und die Kennungen beginnen wieder
+    bei 1 -- ein zwischengespeichertes Modell aus dem Vortest würde dann unter
+    derselben Kennung wiederverwendet.
+    """
+    clear_cache()
+    yield
+    clear_cache()
 
 
 @pytest.fixture
@@ -261,7 +275,10 @@ def test_vorhersagen_werden_ausgestellt(session, gefuellt, trainiert, tmp_path):
     session.flush()
 
     assert anzahl == 2
-    assert not hinweise
+    # Ohne hinterlegte Bias-Korrektur meldet die Vorhersage das -- und das soll sie:
+    # die Modelle sind auf DWD-Werten trainiert, die Station liefert ihre Rohwerte.
+    assert any("Bias-Korrektur" in h for h in hinweise)
+    assert not [h for h in hinweise if "Merkmale fehlen" in h]
 
     zeilen = session.scalars(select(Forecast).order_by(Forecast.target)).all()
     nach_ziel = {z.target: z for z in zeilen}
@@ -273,6 +290,30 @@ def test_vorhersagen_werden_ausgestellt(session, gefuellt, trainiert, tmp_path):
     assert float(q["0.1"]) <= float(q["0.5"]) <= float(q["0.9"])
     # Gültigkeit liegt genau die Vorlaufzeit später.
     assert nach_ziel["rain"].valid_at - nach_ziel["rain"].issued_at == timedelta(hours=6)
+
+
+def test_zwischengespeichertes_modell_liefert_dieselbe_vorhersage(
+    session, trainiert, tmp_path
+):
+    """Der Zwischenspeicher darf das Ergebnis nicht verändern."""
+    regen, _, _, merkmale, _ = trainiert
+    ref = save_rain_model(
+        session,
+        regen,
+        root=tmp_path,
+        train_start=merkmale.index[0].to_pydatetime(),
+        train_end=merkmale.index[-1].to_pydatetime(),
+    )
+    session.flush()
+
+    eingabe = merkmale.iloc[-30:]
+    erste = load_rain_model(session, ref.id).predict(eingabe)
+    zweite = load_rain_model(session, ref.id).predict(eingabe)
+    np.testing.assert_allclose(erste, zweite)
+
+    # Nach dem Leeren muss dasselbe herauskommen -- also wirklich von der Platte.
+    clear_cache()
+    np.testing.assert_allclose(load_rain_model(session, ref.id).predict(eingabe), erste)
 
 
 def test_erneuter_lauf_erzeugt_keine_dublette(session, gefuellt, trainiert, tmp_path):

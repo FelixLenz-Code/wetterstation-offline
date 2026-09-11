@@ -166,7 +166,38 @@ def save_temp_model(
     return _to_ref(row)
 
 
+#: Geladene Modelle, nach Kennung. Ein Modell ist unveränderlich: ein erneutes
+#: Training legt eine neue Zeile mit neuer Kennung an, statt eine bestehende zu
+#: überschreiben. Deshalb ist Zwischenspeichern hier gefahrlos.
+#:
+#: Ohne den Zwischenspeicher lädt jede Vorhersage alle Modelle neu von der Platte.
+#: Im Zehn-Minuten-Takt wäre das verschmerzbar, beim Nachrechnen eines längeren
+#: Zeitraums sind es Tausende Ladevorgänge und der Lauf dauert ein Vielfaches.
+_CACHE: dict[int, RainModel | TempModel] = {}
+
+#: Mehr als so viele Modelle werden nicht vorgehalten. Ein Bündel liegt im
+#: einstelligen Megabyte-Bereich; der Deckel verhindert, dass ein lang laufender
+#: Worker über Monate jede je trainierte Fassung im Speicher behält.
+CACHE_LIMIT = 32
+
+
+def clear_cache() -> None:
+    """Leert den Modell-Zwischenspeicher. Für Tests und nach einem Re-Training."""
+    _CACHE.clear()
+
+
+def _cache_put(model_id: int, model: RainModel | TempModel) -> None:
+    if len(_CACHE) >= CACHE_LIMIT:
+        # Ältesten Eintrag verwerfen -- dict behält die Einfügereihenfolge.
+        _CACHE.pop(next(iter(_CACHE)))
+    _CACHE[model_id] = model
+
+
 def load_rain_model(session: Session, model_id: int) -> RainModel:
+    zwischengespeichert = _CACHE.get(model_id)
+    if isinstance(zwischengespeichert, RainModel):
+        return zwischengespeichert
+
     row = session.get(Model, model_id)
     if row is None or row.artifact_path is None:
         raise RegistryError(f"Modell {model_id} nicht gefunden")
@@ -177,16 +208,22 @@ def load_rain_model(session: Session, model_id: int) -> RainModel:
     if pfad.is_file():
         with open(pfad, "rb") as fh:
             kalibrator = pickle.load(fh)
-    return RainModel(
+    modell = RainModel(
         lead_hours=row.lead_hours,
         booster=booster,
         calibrator=kalibrator,
         feature_names=list(row.feature_names),
         metrics=dict(row.metrics or {}),
     )
+    _cache_put(model_id, modell)
+    return modell
 
 
 def load_temp_model(session: Session, model_id: int) -> TempModel:
+    zwischengespeichert = _CACHE.get(model_id)
+    if isinstance(zwischengespeichert, TempModel):
+        return zwischengespeichert
+
     row = session.get(Model, model_id)
     if row is None or row.artifact_path is None:
         raise RegistryError(f"Modell {model_id} nicht gefunden")
@@ -196,12 +233,14 @@ def load_temp_model(session: Session, model_id: int) -> TempModel:
         float(q): lgb.Booster(model_file=str(ziel / _quantile_file(q)))
         for q in meta["quantiles"]
     }
-    return TempModel(
+    modell = TempModel(
         lead_hours=row.lead_hours,
         boosters=boosters,
         feature_names=list(row.feature_names),
         metrics=dict(row.metrics or {}),
     )
+    _cache_put(model_id, modell)
+    return modell
 
 
 def _to_ref(row: Model) -> ModelRef:
