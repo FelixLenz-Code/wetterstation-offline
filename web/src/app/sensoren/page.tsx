@@ -1,6 +1,7 @@
 import { revalidatePath } from "next/cache";
 
 import { Hinweis, Marke } from "@/components/kachel";
+import { Warnungen } from "@/components/warnungen";
 import { prisma } from "@/lib/db";
 import { ersteStation, sensorzustaende } from "@/lib/queries";
 import { datumZeit, seit } from "@/lib/format";
@@ -59,6 +60,9 @@ export default async function SensorenSeite() {
       orderBy: { createdAt: "desc" },
     }),
   ]);
+
+  // Der öffentliche Schlüssel darf zum Browser; der private bleibt beim Worker.
+  const vapidKey = process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY ?? "";
 
   const nachSensor = new Map(zustaende.map((z) => [z.sensor, z]));
   const wartend = new Map(offen.map((b) => [b.sensorKey ?? "", b]));
@@ -137,6 +141,18 @@ export default async function SensorenSeite() {
           );
         })}
       </div>
+
+      <section className="border-rand space-y-3 border-t pt-6">
+        <h2 className="text-sm font-semibold">Warnungen</h2>
+        {vapidKey ? (
+          <Warnungen vapidKey={vapidKey} />
+        ) : (
+          <p className="text-schrift-leise text-sm">
+            Es ist kein Push-Schlüssel hinterlegt. <code>./install.sh</code> legt
+            ihn beim Einrichten an; danach lassen sich Warnungen abonnieren.
+          </p>
+        )}
+      </section>
 
       <p className="text-schrift-leise text-xs">
         Änderungen gehen als Befehl an die Station und gelten, sobald sie sie

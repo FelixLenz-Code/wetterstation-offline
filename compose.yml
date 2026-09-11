@@ -63,6 +63,10 @@ services:
       WETTER_MQTT_USERNAME: ${MQTT_USER:-station}
       WETTER_MQTT_PASSWORD: ${MQTT_PASSWORD}
       WETTER_MODEL_ROOT: /var/lib/wetter/models
+      # Nur der Worker bekommt den privaten Schlüssel -- er ist der einzige,
+      # der Warnungen verschickt.
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY}
+      VAPID_CLAIM_EMAIL: ${VAPID_CLAIM_EMAIL:-wetterstation@localhost}
       TZ: ${TZ:-Europe/Berlin}
     volumes:
       - model-data:/var/lib/wetter/models
@@ -99,6 +103,8 @@ services:
     restart: unless-stopped
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER:-wetterapp}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
+      # Nur der öffentliche Schlüssel -- er geht ohnehin an jeden Browser.
+      NEXT_PUBLIC_VAPID_PUBLIC_KEY: ${NEXT_PUBLIC_VAPID_PUBLIC_KEY}
       TZ: ${TZ:-Europe/Berlin}
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-3000}:3000"

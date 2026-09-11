@@ -42,3 +42,7 @@ next-env.d.ts
 
 # Prisma erzeugt den Client aus dem Schema -- gehoert nicht ins Repository.
 /src/generated/
+
+# Von Serwist erzeugt
+/public/sw.js
+/public/sw.js.map

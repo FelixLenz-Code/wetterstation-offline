@@ -62,6 +62,18 @@ freier_port() {
   printf '%s' "$port"
 }
 
+vapid_schluessel() {
+  # Web-Push verlangt ein Schlüsselpaar (VAPID). Der öffentliche geht an den
+  # Browser, der private bleibt auf dem Server -- mit ihm signiert der Worker
+  # jede Warnung, damit der Push-Dienst des Browserherstellers sie annimmt.
+  #
+  # Erzeugt wird es im Web-Abbild, weil die Bibliothek dort ohnehin liegt.
+  docker run --rm node:20-slim sh -c \
+    "npm install --silent --no-fund --no-audit web-push >/dev/null 2>&1 && \
+     node -e \"const k=require('web-push').generateVAPIDKeys(); \
+       console.log(k.publicKey+' '+k.privateKey)\"" 2>/dev/null
+}
+
 env_anlegen() {
   [ -f "$ENV_DATEI" ] && return 0
 
@@ -70,6 +82,16 @@ env_anlegen() {
   app_port="$(freier_port 3000)"
   db_port="$(freier_port 55432)"
   [ "$app_port" != "3000" ] && warn "Port 3000 ist belegt, nehme $app_port."
+
+  info "Erzeuge Push-Schlüsselpaar ..."
+  local vapid oeffentlich privat
+  vapid="$(vapid_schluessel)"
+  oeffentlich="${vapid%% *}"
+  privat="${vapid##* }"
+  if [ -z "$oeffentlich" ]; then
+    warn "Push-Schlüssel konnten nicht erzeugt werden -- Warnungen bleiben aus."
+    warn "Nachtragen mit: npx web-push generate-vapid-keys"
+  fi
 
   cat > "$ENV_DATEI" <<EOF
 # Erzeugt von install.sh am $(date -Iseconds)
@@ -87,6 +109,11 @@ MQTT_USER=station
 DB_PORT=$db_port
 
 TZ=$(cat /etc/timezone 2>/dev/null || echo Europe/Berlin)
+
+# Web-Push. Der öffentliche Schlüssel geht an den Browser, der private bleibt hier.
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=$oeffentlich
+VAPID_PRIVATE_KEY=$privat
+VAPID_CLAIM_EMAIL=wetterstation@localhost
 EOF
   chmod 600 "$ENV_DATEI"
   gut "$ENV_DATEI angelegt."

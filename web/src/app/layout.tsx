@@ -9,7 +9,15 @@ export const metadata: Metadata = {
   description:
     "Eigene Messwerte und eine Vorhersage, die ohne Internet auskommt.",
   applicationName: "Wetterstation",
+  manifest: "/manifest.json",
   appleWebApp: { capable: true, title: "Wetter", statusBarStyle: "default" },
+  icons: {
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: "/apple-touch-icon.png",
+  },
 };
 
 export const viewport: Viewport = {

@@ -30,6 +30,14 @@ from wetter.features.climatology import Climatology
 from wetter.ingest.mqtt import MqttSettings
 from wetter.ingest.store import load_state_intervals
 from wetter.ingest.topics import command_topic
+from wetter.worker.alerts import (
+    Alert,
+    evaluate_frost,
+    in_cooldown,
+    load_rules,
+    mark_fired,
+    send_push,
+)
 from wetter.worker.commands import deliver
 from wetter.worker.forecast import run_forecasts
 from wetter.worker.promotion import evaluate_shadow
@@ -45,11 +53,18 @@ COMMAND_INTERVAL = timedelta(seconds=30)
 FORECAST_INTERVAL = timedelta(minutes=10)
 VERIFY_INTERVAL = timedelta(hours=1)
 
+#: Warnungen werden im selben Takt wie die Vorhersage geprüft. Öfter wäre
+#: sinnlos -- es gäbe nichts Neues zu prüfen.
+ALERT_INTERVAL = timedelta(minutes=10)
+
 #: Uhrzeit des nächtlichen Trainings (UTC). 02:00 UTC ist in Deutschland 03:00 bzw.
 #: 04:00 Ortszeit -- gerechnet wird also, wenn niemand hinsieht.
 TRAINING_HOUR = time(2, 0)
 
 MODEL_ROOT = Path(os.environ.get("WETTER_MODEL_ROOT", "/var/lib/wetter/models"))
+
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "")
+VAPID_CLAIM_EMAIL = os.environ.get("VAPID_CLAIM_EMAIL", "wetterstation@localhost")
 
 
 class Worker:
@@ -60,6 +75,7 @@ class Worker:
         self.model_root = model_root
         self.mqtt = mqtt
         self.last_commands = datetime.min.replace(tzinfo=UTC)
+        self.last_alerts = datetime.min.replace(tzinfo=UTC)
         self._climatology: Climatology | None = None
         self._climatology_at: datetime | None = None
         self.last_rollup = datetime.min.replace(tzinfo=UTC)
@@ -137,6 +153,59 @@ class Worker:
         with session_scope(self.factory) as session:
             deliver(session, sende)
 
+    def do_alerts(self) -> None:
+        """Prüft die Vorhersagen auf Warnlagen und stellt sie zu."""
+        if not VAPID_PRIVATE_KEY:
+            return
+
+        from sqlalchemy import select
+
+        from wetter.db.models import Forecast, Model
+
+        jetzt = datetime.now(UTC)
+        with session_scope(self.factory) as session:
+            regeln = {r.kind: r for r in load_rules(session)}
+            frost = regeln.get("FROST")
+            if frost is None or not frost.enabled or in_cooldown(frost, jetzt):
+                return
+
+            # Nur die jüngste Ausstellung je Vorlaufzeit ansehen. Ältere würden
+            # dieselbe Nacht ein zweites Mal melden.
+            zeilen = session.execute(
+                select(Forecast.valid_at, Forecast.quantiles, Forecast.issued_at)
+                .join(Model, Model.id == Forecast.model_id)
+                .where(
+                    Model.target == "temperature",
+                    Model.status == "active",
+                    Forecast.valid_at > jetzt,
+                    Forecast.quantiles.isnot(None),
+                )
+                .order_by(Forecast.issued_at.desc())
+                .limit(40)
+            ).all()
+            if not zeilen:
+                return
+
+            juengste = max(z[2] for z in zeilen)
+            vorhersagen = [(z[0], z[1]) for z in zeilen if z[2] == juengste]
+
+            warnung: Alert | None = evaluate_frost(frost, vorhersagen)
+            if warnung is None:
+                return
+
+            zugestellt, fehlgeschlagen = send_push(
+                session, warnung, VAPID_PRIVATE_KEY, VAPID_CLAIM_EMAIL
+            )
+            if zugestellt > 0:
+                mark_fired(session, warnung.kind, jetzt)
+            log.info(
+                "%s an %d Geräte zugestellt (%d fehlgeschlagen): %s",
+                warnung.title,
+                zugestellt,
+                fehlgeschlagen,
+                warnung.text,
+            )
+
     def do_training(self) -> None:
         with session_scope(self.factory) as session:
             if not needs_training(session):
@@ -156,6 +225,7 @@ class Worker:
             ("Vorhersage", self.last_forecast, FORECAST_INTERVAL, self.do_forecast),
             ("Verifikation", self.last_verify, VERIFY_INTERVAL, self.do_verify),
             ("Befehle", self.last_commands, COMMAND_INTERVAL, self.do_commands),
+            ("Warnungen", self.last_alerts, ALERT_INTERVAL, self.do_alerts),
         ):
             if now - letzte < takt:
                 continue
@@ -171,8 +241,10 @@ class Worker:
                 self.last_forecast = now
             elif name == "Verifikation":
                 self.last_verify = now
-            else:
+            elif name == "Befehle":
                 self.last_commands = now
+            else:
+                self.last_alerts = now
 
         heute = now.date().isoformat()
         if now.time() >= TRAINING_HOUR and self.last_training_day != heute:
