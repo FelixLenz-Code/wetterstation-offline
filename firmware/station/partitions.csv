@@ -1,22 +1,26 @@
-# Partitionen der Aussenstation.
+# Partitionen der Aussenstation. Ausgelegt fuer 4 MB Flash -- die uebliche
+# Bestueckung des ESP32-WROOM-32.
+#
+# Kein "factory" neben ota_0/ota_1: das waere eine dritte App-Partition, die nur
+# Platz kostet. Beim OTA-Betrieb startet der Bootloader ohnehin aus ota_0 oder
+# ota_1, und schlaegt ein frisches Abbild fehl, faellt er auf das vorige zurueck.
+# Genau das braucht eine Station auf dem Mast, die keine zweite Chance hat.
 #
 # Die Besonderheit ist "messdaten": eine eigene Partition fuer den
 # Store-and-Forward-Ringpuffer. Ein Dateisystem waere hier fehl am Platz -- der
 # Puffer schreibt feste Plaetze und zieht seinen Zustand aus einem Zustandsbyte
-# je Platz, das nur Bits loescht. Ein Dateisystem brauchte dafuer Metadaten, die
-# bei jedem Schreibvorgang mitgepflegt werden muessten, und genau die waeren die
-# erste Stelle, an der ein Stromausfall Schaden anrichtet.
+# je Platz, das nur Bits loescht. Ein Dateisystem brauchte dafuer Metadaten, und
+# genau die waeren die erste Stelle, an der ein Stromausfall Schaden anrichtet.
 #
-# 1 MB bei 32 Byte je Datensatz sind rund 32.000 Datensaetze, also gut drei Wochen
-# im Minutentakt.
+# 1 MB bei 32 Byte je Datensatz sind rund 32.000 Datensaetze, also gut drei
+# Wochen im Minutentakt.
 #
-# Zwei OTA-Partitionen, weil ein Update an einer Station auf dem Mast keine zweite
-# Chance hat: schlaegt es fehl, startet der Bootloader die alte Fassung.
-# Name,     Typ,  Subtyp,   Offset,   Groesse,  Flags
-nvs,        data, nvs,      0x9000,   0x6000,
-phy_init,   data, phy,      0xf000,   0x1000,
-factory,    app,  factory,  0x10000,  1500K,
-ota_0,      app,  ota_0,    ,         1500K,
-ota_1,      app,  ota_1,    ,         1500K,
-otadata,    data, ota,      ,         0x2000,
-messdaten,  data, 0x40,     ,         1M,
+# Rechnung: 24K + 4K + 8K + 1408K + 1408K + 1024K = 3876K, dazu 64K fuer
+# Bootloader und Tabelle. Bleiben rund 150K Reserve in 4 MB.
+# Name,     Typ,  Subtyp,   Offset,    Groesse,  Flags
+nvs,        data, nvs,      0x9000,    0x6000,
+phy_init,   data, phy,      0xf000,    0x1000,
+otadata,    data, ota,      0x10000,   0x2000,
+ota_0,      app,  ota_0,    0x20000,   0x160000,
+ota_1,      app,  ota_1,    0x180000,  0x160000,
+messdaten,  data, 0x40,     0x2e0000,  0x100000,

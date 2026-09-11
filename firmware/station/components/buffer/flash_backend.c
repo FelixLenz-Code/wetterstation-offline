@@ -47,7 +47,10 @@ esp_err_t flash_backend_init(rb_flash_t *out)
     out->erase = loeschen;
     out->ctx = NULL;
     out->size = s_part->size;
-    out->sector_size = SPI_FLASH_SEC_SIZE;
+    /* Die Loeschgranularitaet von der Partition selbst nehmen statt aus einer
+     * globalen Konstante: sie gehoert zum Flash-Baustein, und ESP-IDF liefert sie
+     * hier ohnehin mit. */
+    out->sector_size = s_part->erase_size;
 
     ESP_LOGI(TAG, "Messdatenpartition: %lu KB ab 0x%lx",
              (unsigned long)(s_part->size / 1024), (unsigned long)s_part->address);

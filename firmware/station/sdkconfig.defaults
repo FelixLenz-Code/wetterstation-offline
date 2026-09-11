@@ -5,7 +5,12 @@
 
 CONFIG_IDF_TARGET="esp32"
 
-# --- Partitionen ---
+# --- Flash und Partitionen ---
+# Der WROOM-32 ist ueblicherweise mit 4 MB bestueckt. Die Voreinstellung von
+# ESP-IDF sind 2 MB -- damit passt die Partitionstabelle nicht, und der Fehler
+# meldet sich erst beim Bauen, ohne zu sagen, woran es liegt.
+CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+CONFIG_ESPTOOLPY_FLASHSIZE="4MB"
 CONFIG_PARTITION_TABLE_CUSTOM=y
 CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 

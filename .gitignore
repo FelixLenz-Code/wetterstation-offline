@@ -20,3 +20,10 @@ web/.next/
 .cache/
 data/
 .env
+
+# ESP-IDF-Bauartefakte
+firmware/station/build/
+firmware/station/sdkconfig
+firmware/station/sdkconfig.old
+firmware/station/managed_components/
+firmware/station/dependencies.lock

@@ -11,19 +11,21 @@
 
 CC      ?= gcc
 CFLAGS  := -std=c11 -Wall -Wextra -Werror -O2 -g
-CFLAGS  += -I. -I../station/components/buffer/include -I../station/components/sensors/include
+CFLAGS  += -I. -I../station/components/buffer/include
+CFLAGS  += -I../station/components/sensors/include -I../station/components/power/include
 LDLIBS  := -lm
 
 SRC_DIR := ../station/components
 BIN     := build
 
-TESTS := ringbuffer wind_vane sensor_registry bme280 pulse_convert
+TESTS := ringbuffer wind_vane sensor_registry bme280 pulse_convert power_policy
 
 SRC_ringbuffer      := $(SRC_DIR)/buffer/ringbuffer.c
 SRC_wind_vane       := $(SRC_DIR)/sensors/wind_vane.c
 SRC_sensor_registry := $(SRC_DIR)/sensors/sensor_registry.c
 SRC_bme280          := $(SRC_DIR)/sensors/bme280_compensate.c
 SRC_pulse_convert   := $(SRC_DIR)/sensors/pulse_convert.c
+SRC_power_policy    := $(SRC_DIR)/power/power_policy.c
 
 BINS := $(addprefix $(BIN)/test_,$(TESTS))
 
