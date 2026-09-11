@@ -31,6 +31,7 @@ from wetter.features.build import build_features
 from wetter.features.climatology import Climatology
 from wetter.features.targets import RAIN_LEADS, build_targets
 from wetter.models.bias import apply_all, fit_all
+from wetter.models.bias_store import save_mappings
 from wetter.models.registry import save_rain_model, save_temp_model
 from wetter.models.split import TimeSplit
 from wetter.models.train import train_rain_model, train_temp_model
@@ -123,6 +124,10 @@ def train_for_station(
         gemeinsam = [c for c in eigene.columns if c in dwd.columns]
         abbildungen = fit_all(eigene, dwd, columns=gemeinsam)
         bericht.bias_columns = sorted(abbildungen)
+        # Speichern ist keine Nebensache: die Vorhersage muss dieselbe Korrektur
+        # anwenden wie das Training, sonst sieht das Modell im Betrieb systematisch
+        # verschobene Eingaben. Siehe wetter/models/bias_store.py.
+        save_mappings(session, station, abbildungen)
         if abbildungen:
             eigene = apply_all(eigene, abbildungen)
 

@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 from wetter.db.models import Forecast, Hourly, Station
 from wetter.features.build import build_features
 from wetter.features.climatology import Climatology
+from wetter.models.bias_store import apply_to_frame
 from wetter.models.registry import (
     STATUS_ACTIVE,
     STATUS_SHADOW,
@@ -137,6 +138,13 @@ def run_forecasts(
     if stunden.empty or len(stunden) < 2:
         return 0, ["zu wenige Stundenwerte für eine Vorhersage"]
 
+    # Auf die DWD-Skala bringen, bevor Merkmale entstehen. Die Modelle sind auf
+    # DWD-Daten trainiert und denken in deren Werten; die Rohwerte der eigenen
+    # Station tragen den Aufstellungsversatz. Ohne diesen Schritt entsteht ein
+    # Versatz zwischen Training und Betrieb, der die Güte frisst, ohne dass
+    # irgendetwas nach einem Fehler aussieht.
+    stunden, korrigiert = apply_to_frame(session, station, stunden)
+
     merkmale = build_features(
         stunden,
         latitude=station.latitude,
@@ -150,6 +158,11 @@ def run_forecasts(
 
     stati = [STATUS_ACTIVE] + ([STATUS_SHADOW] if include_shadow else [])
     hinweise: list[str] = []
+    if not korrigiert:
+        hinweise.append(
+            "keine Bias-Korrektur hinterlegt -- die Vorhersage rechnet mit "
+            "Rohwerten der Station"
+        )
     zeilen: list[dict] = []
 
     for status in stati:
