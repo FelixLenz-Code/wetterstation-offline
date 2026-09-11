@@ -12,6 +12,7 @@ Teil, bei dem Daten verloren gingen.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import signal
@@ -26,7 +27,10 @@ from wetter.db.models import Station
 from wetter.db.session import make_engine, make_session_factory, session_scope
 from wetter.dwd.store import dwd_coverage, load_dwd_hourly
 from wetter.features.climatology import Climatology
+from wetter.ingest.mqtt import MqttSettings
 from wetter.ingest.store import load_state_intervals
+from wetter.ingest.topics import command_topic
+from wetter.worker.commands import deliver
 from wetter.worker.forecast import run_forecasts
 from wetter.worker.promotion import evaluate_shadow
 from wetter.worker.rollup import pending_range, rollup
@@ -37,6 +41,7 @@ log = logging.getLogger("wetter.worker")
 
 #: Takte der einzelnen Jobs.
 ROLLUP_INTERVAL = timedelta(minutes=5)
+COMMAND_INTERVAL = timedelta(seconds=30)
 FORECAST_INTERVAL = timedelta(minutes=10)
 VERIFY_INTERVAL = timedelta(hours=1)
 
@@ -50,9 +55,11 @@ MODEL_ROOT = Path(os.environ.get("WETTER_MODEL_ROOT", "/var/lib/wetter/models"))
 class Worker:
     """Hält den Zustand zwischen den Läufen."""
 
-    def __init__(self, factory, *, model_root: Path = MODEL_ROOT) -> None:
+    def __init__(self, factory, *, model_root: Path = MODEL_ROOT, mqtt=None) -> None:
         self.factory = factory
         self.model_root = model_root
+        self.mqtt = mqtt
+        self.last_commands = datetime.min.replace(tzinfo=UTC)
         self._climatology: Climatology | None = None
         self._climatology_at: datetime | None = None
         self.last_rollup = datetime.min.replace(tzinfo=UTC)
@@ -111,6 +118,25 @@ class Worker:
             verify_pending(session)
             evaluate_shadow(session)
 
+    def do_commands(self) -> None:
+        """Stellt Befehle der Oberfläche an die Station zu."""
+        if self.mqtt is None:
+            return
+
+        def sende(station_key: str, nutzlast: dict) -> bool:
+            info = self.mqtt.publish(
+                command_topic(station_key),
+                json.dumps(nutzlast, ensure_ascii=False),
+                qos=1,
+                retain=True,
+            )
+            # rc == 0 heisst, der Client hat die Nachricht angenommen. Bei allem
+            # anderen bleibt der Befehl offen und wird erneut versucht.
+            return info.rc == 0
+
+        with session_scope(self.factory) as session:
+            deliver(session, sende)
+
     def do_training(self) -> None:
         with session_scope(self.factory) as session:
             if not needs_training(session):
@@ -129,6 +155,7 @@ class Worker:
             ("Rollup", self.last_rollup, ROLLUP_INTERVAL, self.do_rollup),
             ("Vorhersage", self.last_forecast, FORECAST_INTERVAL, self.do_forecast),
             ("Verifikation", self.last_verify, VERIFY_INTERVAL, self.do_verify),
+            ("Befehle", self.last_commands, COMMAND_INTERVAL, self.do_commands),
         ):
             if now - letzte < takt:
                 continue
@@ -142,8 +169,10 @@ class Worker:
                 self.last_rollup = now
             elif name == "Vorhersage":
                 self.last_forecast = now
-            else:
+            elif name == "Verifikation":
                 self.last_verify = now
+            else:
+                self.last_commands = now
 
         heute = now.date().isoformat()
         if now.time() >= TRAINING_HOUR and self.last_training_day != heute:
@@ -162,7 +191,31 @@ def main() -> int:
 
     engine = make_engine()
     factory = make_session_factory(engine)
-    worker = Worker(factory)
+
+    # Der Worker braucht MQTT nur zum Senden, nicht zum Empfangen -- das macht der
+    # Ingest. Eine eigene Verbindung mit eigenem client_id, damit die beiden sich
+    # nicht gegenseitig vom Broker werfen.
+    import paho.mqtt.client as mqtt_client
+
+    einstellungen = MqttSettings(client_id="wetter-worker")
+    sender = mqtt_client.Client(
+        mqtt_client.CallbackAPIVersion.VERSION2,
+        client_id=einstellungen.client_id,
+        protocol=mqtt_client.MQTTv311,
+    )
+    if einstellungen.username:
+        sender.username_pw_set(einstellungen.username, einstellungen.password)
+    try:
+        sender.connect_async(
+            einstellungen.host, einstellungen.port, einstellungen.keepalive
+        )
+        sender.loop_start()
+    except OSError:
+        # Ohne Broker laufen Rollup, Vorhersage und Training weiter -- nur Befehle
+        # bleiben liegen. Das ist die richtige Reihenfolge der Prioritäten.
+        log.warning("Kein MQTT-Broker erreichbar, Befehle bleiben in der Warteschlange")
+
+    worker = Worker(factory, mqtt=sender)
     worker.model_root.mkdir(parents=True, exist_ok=True)
 
     beenden = threading.Event()
@@ -180,6 +233,8 @@ def main() -> int:
         # Kurz genug, um auf SIGTERM zügig zu reagieren.
         beenden.wait(30)
 
+    sender.loop_stop()
+    sender.disconnect()
     engine.dispose()
     return 0
 

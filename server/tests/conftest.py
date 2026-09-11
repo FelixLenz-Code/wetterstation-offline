@@ -13,6 +13,7 @@ immer.
 from __future__ import annotations
 
 import os
+import pathlib
 
 import pytest
 from sqlalchemy import create_engine, text
@@ -60,8 +61,45 @@ def engine():
     except SQLAlchemyError as exc:
         pytest.skip(f"Datenbank nicht erreichbar: {exc}")
     Base.metadata.create_all(eng)
+    _prisma_schema_anlegen(eng)
     yield eng
     eng.dispose()
+
+
+#: Die Migrationen der Weboberfläche. Das Schema `app` gehört Prisma; die Tests
+#: hier wenden dessen eigene Migrationen an, statt die Tabellen nachzubauen. Ein
+#: Nachbau wäre eine zweite Wahrheit über dieselbe Tabelle und liefe still
+#: auseinander, sobald jemand drüben eine Spalte umbenennt.
+PRISMA_MIGRATIONS = (
+    pathlib.Path(__file__).resolve().parents[2] / "web" / "prisma" / "migrations"
+)
+
+
+def _prisma_schema_anlegen(engine) -> None:
+    """Wendet die Prisma-Migrationen an, soweit vorhanden.
+
+    Fehlen sie (etwa weil nur der Serverteil ausgecheckt ist), laufen die Tests
+    ohne das Schema `app` weiter -- die betroffenen Tests überspringen sich dann
+    von selbst.
+    """
+    if not PRISMA_MIGRATIONS.is_dir():
+        return
+    dateien = sorted(PRISMA_MIGRATIONS.glob("*/migration.sql"))
+    if not dateien:
+        return
+
+    with engine.connect() as con:
+        for datei in dateien:
+            for anweisung in datei.read_text(encoding="utf-8").split(";\n"):
+                if not anweisung.strip():
+                    continue
+                try:
+                    con.execute(text(anweisung))
+                except SQLAlchemyError:
+                    # Bereits vorhanden -- die Migrationen sind nicht idempotent
+                    # geschrieben, und für den Testzweck genügt der Endzustand.
+                    con.rollback()
+        con.commit()
 
 
 @pytest.fixture
@@ -71,11 +109,17 @@ def session(engine) -> Session:
     TRUNCATE statt Rollback: der Ingest ruft selbst ``flush`` und legt Stationen an,
     eine geschachtelte Transaktion würde das Verhalten verfälschen.
     """
-    tabellen = ", ".join(
+    tabellen = [
         f'"{SCHEMA}"."{t.name}"' for t in reversed(Base.metadata.sorted_tables)
-    )
+    ]
     with engine.connect() as con:
-        con.execute(text(f"TRUNCATE {tabellen} RESTART IDENTITY CASCADE"))
+        # Die Tabellen der Oberfläche gehören Prisma, müssen zwischen den Tests
+        # aber genauso leer sein -- sonst sieht ein Test die Befehle des vorigen.
+        app_tabellen = con.execute(
+            text("SELECT tablename FROM pg_tables WHERE schemaname = 'app'")
+        ).scalars().all()
+        tabellen += [f'"app"."{t}"' for t in app_tabellen]
+        con.execute(text(f"TRUNCATE {', '.join(tabellen)} RESTART IDENTITY CASCADE"))
         con.commit()
 
     factory = sessionmaker(engine, expire_on_commit=False)
