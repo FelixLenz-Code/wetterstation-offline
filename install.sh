@@ -73,6 +73,7 @@ env_anlegen() {
 
   cat > "$ENV_DATEI" <<EOF
 # Erzeugt von install.sh am $(date -Iseconds)
+POSTGRES_USER=wetterapp
 POSTGRES_PASSWORD=$(passwort)
 MQTT_PASSWORD=$(passwort)
 
@@ -172,7 +173,7 @@ zustand() {
   source "$ENV_DATEI" 2>/dev/null || true
   if compose exec -T db pg_isready -q 2>/dev/null; then
     info "Datenbankinhalt:"
-    compose exec -T db psql -U "${POSTGRES_USER:-wetter}" -d "${POSTGRES_DB:-wetter}" -tAc "
+    compose exec -T db psql -U "${POSTGRES_USER:-wetterapp}" -d "${POSTGRES_DB:-wetter}" -tAc "
       SELECT '  Messwerte:     '||count(*) FROM wetter.measurement
       UNION ALL SELECT '  Stundenwerte:  '||count(*) FROM wetter.hourly
       UNION ALL SELECT '  DWD-Stunden:   '||count(*) FROM wetter.dwd_hourly
@@ -197,7 +198,7 @@ sichern() {
   tmp="$(mktemp -d)"
   trap 'rm -rf "$tmp"' RETURN
 
-  compose exec -T db pg_dump -U "${POSTGRES_USER:-wetter}" -d "${POSTGRES_DB:-wetter}" \
+  compose exec -T db pg_dump -U "${POSTGRES_USER:-wetterapp}" -d "${POSTGRES_DB:-wetter}" \
     > "$tmp/datenbank.sql"
   # Die Modelldateien liegen im Volume und gehören dazu -- ohne sie müsste nach
   # dem Zurückspielen alles neu trainiert werden.
@@ -227,10 +228,10 @@ zurueckspielen() {
   source "$ENV_DATEI"
   compose up -d db
   sleep 5
-  compose exec -T db psql -U "${POSTGRES_USER:-wetter}" -d postgres \
+  compose exec -T db psql -U "${POSTGRES_USER:-wetterapp}" -d postgres \
     -c "DROP DATABASE IF EXISTS ${POSTGRES_DB:-wetter}" \
     -c "CREATE DATABASE ${POSTGRES_DB:-wetter}"
-  compose exec -T db psql -U "${POSTGRES_USER:-wetter}" -d "${POSTGRES_DB:-wetter}" \
+  compose exec -T db psql -U "${POSTGRES_USER:-wetterapp}" -d "${POSTGRES_DB:-wetter}" \
     < "$tmp/datenbank.sql" >/dev/null
 
   if [ -f "$tmp/modelle.tar.gz" ]; then

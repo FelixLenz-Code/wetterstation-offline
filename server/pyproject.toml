@@ -50,6 +50,9 @@ packages = [
 [tool.ruff]
 target-version = "py312"
 line-length = 90
+# Migrationsdateien erzeugt Alembic selbst -- sie von Hand nachzuformatieren
+# hiesse, bei jedem Autogenerate dieselbe Arbeit noch einmal zu machen.
+extend-exclude = ["migrations/versions"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "BLE"]

@@ -250,6 +250,29 @@ class DwdHourly(Base):
     )
 
 
+class BiasMapping(Base):
+    """Gelernte Quantil-Abbildung einer Spalte auf die DWD-Skala.
+
+    Muss gespeichert werden, nicht nur beim Training benutzt: die Modelle denken in
+    DWD-Werten, also müssen die eigenen Messwerte auch *bei jeder Vorhersage* auf
+    diese Skala gebracht werden. Wer die Abbildung nur im Training anwendet und
+    danach wegwirft, bekommt einen Versatz zwischen Training und Betrieb -- das
+    Modell sieht dann systematisch verschobene Eingaben und liegt daneben, ohne dass
+    irgendetwas nach einem Fehler aussieht.
+    """
+
+    __tablename__ = "bias_mapping"
+
+    station_id: Mapped[int] = mapped_column(
+        ForeignKey(f"{SCHEMA}.station.id"), primary_key=True
+    )
+    column_name: Mapped[str] = mapped_column(String(48), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSONB)
+    samples: Mapped[int] = mapped_column(Integer)
+    median_shift: Mapped[float] = mapped_column(Float)
+    fitted_at: Mapped[datetime] = _ts()
+
+
 class Model(Base):
     """Modell-Register.
 

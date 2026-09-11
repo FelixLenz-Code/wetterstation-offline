@@ -11,6 +11,11 @@ jobs:
     name: Server (ruff + pytest)
     runs-on: ubuntu-latest
 
+    # Der Benutzer heisst wetterapp, nicht wetter: hiesse er wie das Schema, waere
+    # das Schema ueber "$user" das Standardschema der Verbindung und Alembics
+    # Autogenerate erzeugte unbrauchbare Migrationen. test_migrations.py haelt das
+    # als Zusicherung fest.
+    #
     # Die Ingest-Tests brauchen echtes Postgres. SQLite täte es nicht: der Ingest
     # lebt von INSERT ... ON CONFLICT DO UPDATE mit coalesce auf excluded, von JSONB
     # und BRIN-Indizes. Ein Test gegen SQLite gäbe grüne Haken und scheiterte im
@@ -19,13 +24,13 @@ jobs:
       postgres:
         image: postgres:17-alpine
         env:
-          POSTGRES_USER: wetter
+          POSTGRES_USER: wetterapp
           POSTGRES_PASSWORD: wetter
           POSTGRES_DB: wetter
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U wetter"
+          --health-cmd "pg_isready -U wetterapp"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
@@ -53,15 +58,15 @@ jobs:
       - name: Tests
         working-directory: server
         env:
-          WETTER_TEST_DATABASE_URL: postgresql+psycopg://wetter:wetter@localhost:5432/wetter
+          WETTER_TEST_DATABASE_URL: postgresql+psycopg://wetterapp:wetter@localhost:5432/wetter
         run: python -m pytest tests/ -q
 
       - name: Migration prüfen (hoch, zurück, wieder hoch)
         working-directory: server
         env:
-          WETTER_DATABASE_URL: postgresql+psycopg://wetter:wetter@localhost:5432/migrationstest
+          WETTER_DATABASE_URL: postgresql+psycopg://wetterapp:wetter@localhost:5432/migrationstest
         run: |
-          psql "postgresql://wetter:wetter@localhost:5432/wetter" -c 'CREATE DATABASE migrationstest'
+          psql "postgresql://wetterapp:wetter@localhost:5432/wetter" -c 'CREATE DATABASE migrationstest'
           alembic upgrade head
           alembic downgrade base
           alembic upgrade head

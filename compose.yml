@@ -1,5 +1,11 @@
 # Wetterstation -- vollständiger Stack.
 #
+# Der Datenbankbenutzer heißt bewusst wetterapp und nicht wetter: Postgres hat den
+# Standard-Suchpfad "$user", public. Hieße der Benutzer wie das Schema, wäre wetter
+# das Standardschema der Verbindung -- und Alembic würde bei jedem Autogenerate
+# dieselben Fremdschlüssel als geändert melden und unbrauchbare Migrationen
+# schreiben. Siehe server/migrations/env.py.
+#
 # Portkonvention wie in deinen übrigen Projekten: APP_PORT und BIND_ADDR aus der
 # .env, Standard ist 127.0.0.1 -- die App ist also zunächst nur lokal erreichbar.
 # Der MQTT-Broker ist die Ausnahme: an den muss die Station aus dem WLAN kommen,
@@ -12,7 +18,7 @@ services:
     image: postgres:17-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-wetter}
+      POSTGRES_USER: ${POSTGRES_USER:-wetterapp}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
       POSTGRES_DB: ${POSTGRES_DB:-wetter}
     volumes:
@@ -21,7 +27,7 @@ services:
     ports:
       - "127.0.0.1:${DB_PORT:-55432}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wetter}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wetterapp}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -51,7 +57,7 @@ services:
     restart: unless-stopped
     command: ["wetter-ingest"]
     environment: &server-env
-      WETTER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-wetter}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
+      WETTER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-wetterapp}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
       WETTER_MQTT_HOST: mqtt
       WETTER_MQTT_PORT: "1883"
       WETTER_MQTT_USERNAME: ${MQTT_USER:-station}
@@ -92,7 +98,7 @@ services:
       context: ./web
     restart: unless-stopped
     environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER:-wetter}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wetterapp}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
       TZ: ${TZ:-Europe/Berlin}
     ports:
       - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-3000}:3000"

@@ -19,7 +19,7 @@ class DbSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="WETTER_", extra="ignore")
 
-    database_url: str = "postgresql+psycopg://wetter:wetter@localhost:5432/wetter"
+    database_url: str = "postgresql+psycopg://wetterapp:wetter@localhost:5432/wetter"
     echo_sql: bool = False
 
 

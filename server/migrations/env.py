@@ -3,6 +3,18 @@
 Legt das Schema ``wetter`` bei Bedarf selbst an -- eine frisch hochgefahrene
 Postgres-Instanz aus dem Compose-Stack hat es noch nicht, und ein Fehlschlag beim
 allerersten Start wäre eine unnötige Hürde.
+
+Eine Falle, die hier viel Zeit gekostet hat und deshalb festgehalten gehört: der
+**Datenbankbenutzer darf nicht so heißen wie das Schema**. Postgres hat den
+Standard-Suchpfad ``"$user", public``; heißt der Benutzer ``wetter`` und das Schema
+auch, dann ist ``wetter`` das Standardschema der Verbindung. SQLAlchemy normalisiert
+dann bei der Reflexion ``wetter.forecast`` zu ``forecast`` ohne Schema, während die
+Metadaten ``wetter.forecast`` sagen. Alembic hält beides für verschiedene Tabellen
+und schreibt bei *jedem* Autogenerate dieselben sechs Fremdschlüssel als entfernt
+und wieder hinzugefügt in eine neue Migration -- mit ``drop_constraint``-Aufrufen
+ohne Schemaangabe, die zur Laufzeit scheitern.
+
+Deshalb heißt der Benutzer ``wetterapp``. Siehe compose.yml.
 """
 
 from logging.config import fileConfig
@@ -21,22 +33,25 @@ config.set_main_option("sqlalchemy.url", DbSettings().database_url)
 target_metadata = Base.metadata
 
 
-def include_object(obj, name, type_, reflected, compare_to) -> bool:
-    """Filtert aus, was Alembic nicht selbst verwalten soll.
+#: Verwaltungstabellen der beiden Migrationssysteme. Keines der beiden darf das
+#: andere sehen, sonst schreibt es ein DROP dafür in seine Migration.
+VERWALTUNGSTABELLEN = {"alembic_version", "_prisma_migrations"}
 
-    Ohne den Filter erkennt ein Autogenerate-Lauf mit ``include_schemas=True`` die
-    eigene Verwaltungstabelle ``alembic_version`` als "entfernt" und schreibt ein
-    DROP dafür in die Migration -- die dann ihre eigene Buchführung zerstört.
 
-    Ebenso bleibt alles ausserhalb des Schemas ``wetter`` unangetastet: das Schema
-    ``app`` gehört Prisma und der PWA.
+def include_name(name, type_, parent_names) -> bool:
+    """Beschränkt die Reflexion auf das Schema ``wetter``.
+
+    Ohne die Einschränkung sieht Alembic auch das Schema ``app``, das Prisma gehört,
+    und meldet dessen Tabellen als entfernt.
     """
-    if name == "alembic_version":
-        return False
-    schema = getattr(obj, "schema", None)
-    if type_ == "table" and schema not in (SCHEMA, None):
-        return False
+    if type_ == "schema":
+        return name == SCHEMA
     return True
+
+
+def include_object(obj, name, type_, reflected, compare_to) -> bool:
+    """Filtert die Verwaltungstabellen beider Migrationssysteme aus."""
+    return name not in VERWALTUNGSTABELLEN
 
 
 def run_migrations_offline() -> None:
@@ -46,6 +61,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         include_schemas=True,
         include_object=include_object,
+        include_name=include_name,
         version_table_schema=SCHEMA,
         dialect_opts={"paramstyle": "named"},
     )
@@ -67,6 +83,7 @@ def run_migrations_online() -> None:
             target_metadata=target_metadata,
             include_schemas=True,
             include_object=include_object,
+            include_name=include_name,
             version_table_schema=SCHEMA,
             compare_type=True,
         )
