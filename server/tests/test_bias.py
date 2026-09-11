@@ -126,11 +126,55 @@ def test_abbildung_ist_monoton(wahrheit):
     assert np.all(np.diff(abbildung.apply(x)) >= -1e-9)
 
 
+def test_umkehrung_hebt_die_korrektur_wieder_auf(wahrheit):
+    """Hin und zurück muss den Ausgangswert ergeben.
+
+    Gebraucht wird die Umkehrung für die *Ausgabe* der Modelle: sie sind auf
+    DWD-Daten trainiert und liefern DWD-Werte, angezeigt wird aber neben den
+    Rohwerten der eigenen Station.
+    """
+    abbildung = _fit(wahrheit + 1.5, wahrheit)
+    x = np.linspace(float(np.min(wahrheit)), float(np.max(wahrheit)), 200)
+    np.testing.assert_allclose(abbildung.inverse(abbildung.apply(x)), x, atol=1e-6)
+
+
+def test_umkehrung_zieht_den_versatz_wieder_auf(wahrheit):
+    """Eine Vorhersage in DWD-Werten muss auf der Stationsskala landen."""
+    abbildung = _fit(wahrheit + 1.5, wahrheit)
+    # Das Modell sagt 12 Grad in DWD-Werten -- die Station läge bei rund 13,5.
+    assert float(abbildung.inverse(12.0)) == pytest.approx(13.5, abs=0.2)
+
+
+def test_umkehrung_ausserhalb_des_bereichs_wird_fortgeschrieben(wahrheit):
+    abbildung = _fit(wahrheit + 2.0, wahrheit)
+    extrem = float(np.max(wahrheit) + 20.0)
+    assert float(abbildung.inverse(extrem)) == pytest.approx(extrem + 2.0, abs=0.6)
+
+
+def test_umkehrung_erhaelt_fehlwerte(wahrheit):
+    abbildung = _fit(wahrheit + 1.0, wahrheit)
+    out = abbildung.inverse([np.nan, 10.0])
+    assert np.isnan(out[0]) and np.isfinite(out[1])
+
+
+def test_nicht_umkehrbare_abbildung_wird_abgelehnt():
+    """Auch die Referenzseite muss streng steigen, sonst geht die Umkehrung nicht.
+
+    Tritt real auf: die Bewölkung führt der DWD in Achteln, da wiederholen sich
+    Quantilwerte.
+    """
+    rng = np.random.default_rng(2)
+    stufig = np.round(rng.uniform(0, 8, 2000))
+    stetig = rng.normal(4, 2, 2000)
+    assert fit_mapping(reihe(stetig), reihe(stufig), column="cloud_cover_okta") is None
+
+
 def test_serialisierung_ist_verlustfrei(wahrheit):
     abbildung = _fit(wahrheit + 1.0, wahrheit)
     zurueck = QuantileMapping.from_dict(abbildung.to_dict())
     x = np.linspace(0, 25, 50)
     np.testing.assert_allclose(zurueck.apply(x), abbildung.apply(x))
+    np.testing.assert_allclose(zurueck.inverse(x), abbildung.inverse(x))
 
 
 def test_mehrere_spalten_auf_einmal(wahrheit):

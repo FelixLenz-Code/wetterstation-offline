@@ -22,7 +22,7 @@ from sqlalchemy.orm import Session
 from wetter.db.models import Forecast, Hourly, Station
 from wetter.features.build import build_features
 from wetter.features.climatology import Climatology
-from wetter.models.bias_store import apply_to_frame
+from wetter.models.bias_store import apply_to_frame, load_mappings
 from wetter.models.registry import (
     STATUS_ACTIVE,
     STATUS_SHADOW,
@@ -144,6 +144,8 @@ def run_forecasts(
     # Versatz zwischen Training und Betrieb, der die Güte frisst, ohne dass
     # irgendetwas nach einem Fehler aussieht.
     stunden, korrigiert = apply_to_frame(session, station, stunden)
+    # Dieselbe Abbildung wird für die Rückrechnung der Modellausgaben gebraucht.
+    temperatur_abbildung = load_mappings(session, station).get("temperature_c")
 
     merkmale = build_features(
         stunden,
@@ -176,7 +178,9 @@ def run_forecasts(
                     f"Modell {ref.id} ({ref.target}, {ref.lead_hours} h): "
                     f"{len(fehlend)} Merkmale fehlen"
                 )
-            zeile = _predict_one(session, station, ref, letzte, ausgestellt)
+            zeile = _predict_one(
+                session, station, ref, letzte, ausgestellt, temperatur_abbildung
+            )
             if zeile is not None:
                 zeilen.append(zeile)
 
@@ -196,6 +200,7 @@ def _predict_one(
     ref: ModelRef,
     features: pd.DataFrame,
     issued_at: datetime,
+    temp_mapping=None,
 ) -> dict | None:
     """Rechnet ein einzelnes Modell und formt die Datenbankzeile."""
     gueltig = issued_at + timedelta(hours=ref.lead_hours)
@@ -219,6 +224,10 @@ def _predict_one(
         if ref.target == "temperature":
             modell = load_temp_model(session, ref.id)
             q = modell.predict(eingabe)
+            if temp_mapping is not None:
+                # Zurück auf die Skala der eigenen Station -- dort wird die
+                # Vorhersage angezeigt und gegen die Messung bewertet.
+                q = {k: temp_mapping.inverse(v) for k, v in q.items()}
             median = q.get(0.5)
             return {
                 "model_id": ref.id,

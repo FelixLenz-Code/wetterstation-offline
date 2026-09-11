@@ -67,6 +67,32 @@ class QuantileMapping:
             out = np.where(oben, x + versatz, out)
         return np.where(np.isnan(x), np.nan, out)
 
+    def inverse(self, values) -> np.ndarray:
+        """Rechnet von der Referenzskala zurück auf die eigene Station.
+
+        Gebraucht für die *Ausgabe* der Modelle, und das ist kein Detail: die
+        Modelle sind auf DWD-Daten trainiert und denken in DWD-Werten. Korrigiert man
+        nur die Eingabe, kommt auch die Vorhersage in DWD-Werten heraus -- verglichen
+        und angezeigt wird sie aber neben den Rohwerten der eigenen Station.
+
+        Nachgemessen an einem vollen Durchlauf mit 0,8 K Aufstellungsversatz: nur die
+        Eingabe zu korrigieren machte den mittleren Temperaturfehler auf sechs Stunden
+        *schlechter* (2,32 auf 2,49 K), weil die Vorhersage dann systematisch um den
+        Versatz neben der Beobachtung lag.
+        """
+        x = np.asarray(values, dtype=float)
+        out = np.interp(x, self.reference_quantiles, self.own_quantiles)
+
+        unten = x < self.reference_quantiles[0]
+        oben = x > self.reference_quantiles[-1]
+        if unten.any():
+            versatz = self.own_quantiles[0] - self.reference_quantiles[0]
+            out = np.where(unten, x + versatz, out)
+        if oben.any():
+            versatz = self.own_quantiles[-1] - self.reference_quantiles[-1]
+            out = np.where(oben, x + versatz, out)
+        return np.where(np.isnan(x), np.nan, out)
+
     @property
     def median_shift(self) -> float:
         """Versatz in der Mitte der Verteilung -- die Zahl fürs Logbuch."""
@@ -123,10 +149,12 @@ def fit_mapping(
     eigene = np.quantile(gemeinsam["own"].to_numpy(), quantiles)
     referenz = np.quantile(gemeinsam["ref"].to_numpy(), quantiles)
 
-    if not np.all(np.diff(eigene) > 0):
-        # np.interp braucht streng steigende Stützstellen. Wiederholte Werte treten
-        # bei grob quantisierten Sensoren auf -- dann lieber nicht korrigieren, als
-        # eine Abbildung zu bauen, die Werte verschluckt.
+    if not np.all(np.diff(eigene) > 0) or not np.all(np.diff(referenz) > 0):
+        # np.interp braucht streng steigende Stützstellen -- und zwar auf *beiden*
+        # Seiten, weil die Abbildung auch rückwärts genutzt wird. Wiederholte Werte
+        # treten bei grob quantisierten Größen auf (Bewölkung in Achteln etwa); dann
+        # lieber nicht korrigieren, als eine Abbildung zu bauen, die Werte
+        # verschluckt oder sich nicht umkehren lässt.
         log.warning("%s: Stützstellen nicht streng steigend, keine Korrektur", column)
         return None
 

@@ -106,3 +106,20 @@ def apply_to_frame(
         return frame, []
     genutzt = [c for c in abbildungen if c in frame.columns]
     return apply_all(frame, abbildungen), sorted(genutzt)
+
+
+def to_station_scale(
+    session: Session, station: Station, column: str, values
+) -> object:
+    """Rechnet eine Modellausgabe zurück auf die Skala der eigenen Station.
+
+    Das Gegenstück zu :func:`apply_to_frame`. Die Modelle sind auf DWD-Daten
+    trainiert; korrigiert man nur die Eingabe, kommt auch die Vorhersage in
+    DWD-Werten heraus -- angezeigt und bewertet wird sie aber neben den Rohwerten
+    der eigenen Station. Ohne diese Rückrechnung liegt die Vorhersage systematisch
+    um den Aufstellungsversatz daneben.
+
+    Ist für die Spalte keine Abbildung hinterlegt, bleiben die Werte unverändert.
+    """
+    abbildung = load_mappings(session, station).get(column)
+    return values if abbildung is None else abbildung.inverse(values)
