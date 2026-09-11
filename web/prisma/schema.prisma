@@ -250,3 +250,39 @@ model AlertRule {
   @@map("alert_rule")
   @@schema("app")
 }
+
+enum CommandState {
+  PENDING
+  SENT
+  FAILED
+
+  @@schema("app")
+}
+
+/// Ein Befehl an die Station, der noch verschickt werden muss.
+///
+/// Warum die Oberfläche den Sensorzustand nicht selbst in `wetter.sensor_state`
+/// schreibt: dann wüsste die Datenbank etwas, das die Station nicht weiss. Beim
+/// nächsten Neustart meldete das Gerät seinen alten Zustand, und die Oberfläche
+/// hätte still gelogen. Stattdessen legt sie hier einen Befehl ab, der Worker
+/// schickt ihn per MQTT, und die Station meldet den neuen Zustand zurück -- der
+/// Ingest schreibt ihn dann auf dem üblichen Weg in die Historie.
+///
+/// Nebeneffekt, der den Aufwand rechtfertigt: der Befehl überlebt einen Neustart
+/// und eine Station, die gerade offline ist.
+model StationCommand {
+  id          String       @id @default(cuid())
+  stationKey  String
+  /// Sensorschlüssel wie "bme280", oder null für stationsweite Befehle.
+  sensorKey   String?
+  /// "productive", "test" oder "inactive".
+  desiredState String?
+  createdAt   DateTime     @default(now())
+  state       CommandState @default(PENDING)
+  sentAt      DateTime?
+  note        String?
+
+  @@index([state, createdAt])
+  @@map("station_command")
+  @@schema("app")
+}

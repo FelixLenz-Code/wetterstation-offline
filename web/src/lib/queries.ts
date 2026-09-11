@@ -195,3 +195,128 @@ export async function aktuelleVorhersagen(
   }
   return out.sort((a, b) => a.vorlaufStunden - b.vorlaufStunden);
 }
+
+export type Guete = {
+  ziel: string;
+  vorlaufStunden: number;
+  anzahl: number;
+  /** Brier Score beim Regen, mittlerer absoluter Fehler bei der Temperatur. */
+  fehler: number;
+  /** Anteil der Fälle, in denen es tatsächlich geregnet hat. */
+  basisrate: number | null;
+  /** Brier Score der Klimatologie -- also der Vergleichsmassstab. */
+  klimatologie: number | null;
+  /** Anteil der Beobachtungen im 10-bis-90-Prozent-Band. */
+  bandTreffer: number | null;
+};
+
+/**
+ * Güte der aktiven Modelle über einen Zeitraum.
+ *
+ * Bewusst als rohes SQL: die Bewertungen liegen als JSONB, und die Aggregation
+ * über einen JSONB-Schlüssel ist in SQL eine Zeile und über den ORM eine
+ * Schleife über Zehntausende Zeilen.
+ */
+export async function guete(stationId: number, tage = 30): Promise<Guete[]> {
+  const zeilen = await prisma.$queryRaw<
+    {
+      target: string;
+      lead_hours: number;
+      anzahl: bigint;
+      fehler: number | null;
+      basisrate: number | null;
+      band: number | null;
+    }[]
+  >`
+    SELECT m.target,
+           m.lead_hours,
+           count(*)                                            AS anzahl,
+           avg(COALESCE((v.scores->>'brier')::float,
+                        (v.scores->>'absolute_error')::float))  AS fehler,
+           avg(v.observed) FILTER (WHERE m.target = 'rain')     AS basisrate,
+           avg((v.scores->>'in_band')::float)                   AS band
+      FROM wetter.verification v
+      JOIN wetter.forecast f ON f.id = v.forecast_id
+      JOIN wetter.model m    ON m.id = f.model_id
+     WHERE f.station_id = ${stationId}
+       AND m.status = 'active'
+       AND f.issued_at >= now() - (${tage} || ' days')::interval
+     GROUP BY m.target, m.lead_hours
+     ORDER BY m.target, m.lead_hours
+  `;
+
+  return zeilen.map((z) => {
+    const basisrate = z.basisrate;
+    return {
+      ziel: z.target,
+      vorlaufStunden: z.lead_hours,
+      anzahl: Number(z.anzahl),
+      fehler: z.fehler ?? 0,
+      basisrate,
+      // Der Brier Score der Klimatologie ist bei einer konstanten Vorhersage der
+      // Basisrate genau p*(1-p) -- der Massstab, den ein Modell schlagen muss.
+      klimatologie: basisrate === null ? null : basisrate * (1 - basisrate),
+      bandTreffer: z.band,
+    };
+  });
+}
+
+export type Zuverlaessigkeit = {
+  vorlaufStunden: number;
+  balken: { mitte: number; vorhergesagt: number; beobachtet: number; anzahl: number }[];
+};
+
+/**
+ * Zuverlässigkeitsdiagramm: sagt „70 %" auch in 70 % der Fälle Regen?
+ *
+ * Das ist die Zahl, die zählt. Eine Trefferquote sagt wenig; erst hier sieht man,
+ * *wo* ein Modell danebenliegt -- ob es durchweg zu selbstbewusst ist oder nur bei
+ * hohen Wahrscheinlichkeiten.
+ */
+export async function zuverlaessigkeit(
+  stationId: number,
+  tage = 90,
+): Promise<Zuverlaessigkeit[]> {
+  const zeilen = await prisma.$queryRaw<
+    {
+      lead_hours: number;
+      eimer: number;
+      vorhergesagt: number;
+      beobachtet: number;
+      anzahl: bigint;
+    }[]
+  >`
+    SELECT m.lead_hours,
+           width_bucket(f.value, 0, 1, 10) AS eimer,
+           avg(f.value)                    AS vorhergesagt,
+           avg(v.observed)                 AS beobachtet,
+           count(*)                        AS anzahl
+      FROM wetter.verification v
+      JOIN wetter.forecast f ON f.id = v.forecast_id
+      JOIN wetter.model m    ON m.id = f.model_id
+     WHERE f.station_id = ${stationId}
+       AND m.target = 'rain'
+       AND m.status = 'active'
+       AND f.value IS NOT NULL
+       AND f.issued_at >= now() - (${tage} || ' days')::interval
+     GROUP BY m.lead_hours, eimer
+     ORDER BY m.lead_hours, eimer
+  `;
+
+  const nachVorlauf = new Map<number, Zuverlaessigkeit>();
+  for (const z of zeilen) {
+    if (!nachVorlauf.has(z.lead_hours)) {
+      nachVorlauf.set(z.lead_hours, { vorlaufStunden: z.lead_hours, balken: [] });
+    }
+    nachVorlauf.get(z.lead_hours)!.balken.push({
+      // width_bucket zählt ab 1; Eimer 11 fängt den Wert exakt 1,0 ab.
+      mitte: (Math.min(z.eimer, 10) - 0.5) / 10,
+      vorhergesagt: z.vorhergesagt,
+      beobachtet: z.beobachtet,
+      anzahl: Number(z.anzahl),
+    });
+  }
+  return [...nachVorlauf.values()].sort(
+    (a, b) => a.vorlaufStunden - b.vorlaufStunden,
+  );
+}

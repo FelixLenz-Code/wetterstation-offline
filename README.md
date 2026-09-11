@@ -23,22 +23,24 @@ Meeresniveau, Taupunkt, Windkomponenten — dient genau diesem Zweck.
 
 | Teil | Status |
 | --- | --- |
-| DWD-Import (11 Messgrößen, Stationssuche, Bootstrap) | fertig, gegen echte Daten geprüft |
+| DWD-Import (11 Messgrößen, Stationssuche, Bootstrap) | fertig, 272.000 Stunden in 17 s |
 | Meteorologische Umrechnungen | fertig, gegen DWD-Rechnung validiert |
 | Merkmalsbau (45 Merkmale) + Klimatologie | fertig |
 | Baselines (Persistenz, Klimatologie, Zambretti) | fertig |
 | Verifikation (Brier, BSS, CRPS, Zuverlässigkeit) | fertig |
-| Training (LightGBM: Regen + Temperatur) | fertig, Güte gemessen |
-| Datenbank (9 Tabellen, Alembic) | fertig, gegen Postgres 17 geprüft |
+| Training, Modell-Register, Schattenbetrieb | fertig, Güte gemessen |
+| Bias-Korrektur und konformale Bandeichung | fertig |
+| Datenbank (10 Tabellen, Alembic) | fertig, gegen Postgres 17 geprüft |
 | Sensorzustände und Testmodus | fertig |
-| MQTT-Ingest mit Plausibilitätsprüfung | fertig, Ende zu Ende geprüft |
-| Firmware: Ringpuffer, Windfahne | fertig, 22 Host-Tests |
-| Firmware: Sensortreiber, MQTT, Energieverwaltung | offen |
-| Stundenaggregation, Inferenz-Takt, Re-Training | offen |
-| PWA und Deployment | offen |
+| MQTT-Ingest, Befehlswarteschlange | fertig, Ende zu Ende geprüft |
+| PWA: Jetzt, Verlauf, Vorhersage, Güte, Sensoren | fertig |
+| Deployment: Compose, Mosquitto, install.sh | fertig |
+| Firmware: Ringpuffer, Windfahne, Sensorverwaltung | fertig, 38 Host-Tests |
+| Firmware: ESP-IDF-Treiber, MQTT, Energieverwaltung | offen |
+| Web-Push-Warnungen, Service Worker | offen |
 
-**104 Tests** im Server (11 davon gegen echtes Postgres), **22 Host-Tests** in der
-Firmware, alles in der CI.
+**263 Server-Tests** (davon rund 70 gegen echtes Postgres) und **38 Host-Tests** in
+der Firmware, alles in der CI.
 
 ## Gemessene Güte
 
@@ -61,10 +63,14 @@ also tatsächlich ungefähr 70 %.
 
 | Vorlauf | Klimatologie | Persistenz | **Modell** | Gewinn |
 | --- | --- | --- | --- | --- |
-| 6 h | 3,42 | 3,81 | **1,54** | +55,0 % |
-| 12 h | 3,42 | 5,28 | **2,01** | +41,4 % |
-| 24 h | 3,42 | 2,75 | **2,31** | +32,6 % |
-| 48 h | 3,42 | 3,49 | **2,89** | +15,6 % |
+| 6 h | 3,42 | 3,81 | **1,60** | +53 % |
+| 24 h | 3,42 | 2,75 | **2,31** | +32 % |
+| 48 h | 3,42 | 3,49 | **2,89** | +16 % |
+
+Das 10-bis-90-Prozent-Band trifft über 2022 bis 2026 in **79 %** der Fälle -- also
+genau so oft, wie es verspricht. Die Abdeckung schwankt allerdings deutlich über das
+Jahr, von 85 % im März bis 68 % im Juni: der Sommer ist schwerer vorherzusagen.
+Deshalb wird das Band je Kalendermonat eigens geeicht.
 
 Der Abfall zu 48 Stunden hin ist keine Schwäche der Umsetzung, sondern die
 physikalische Grenze: eine Punktmessung sieht die großräumige Wetterlage nicht.

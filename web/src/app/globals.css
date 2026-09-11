@@ -15,6 +15,17 @@
   --gefahr: #b42318;
   --gut: #15803d;
   --test: #7c3aed;
+
+  /* Diagrammfarben aus der geprüften Palette. Beide Modi einzeln gewählt, nicht
+     umgerechnet -- eine automatisch aufgehellte Farbe besteht die Prüfung nicht.
+     Geprüft gegen die Flächenfarbe --grund-erhoben: CVD-Abstand 9,2 (hell) und
+     9,4 (dunkel), Normalsicht 27,6 und 26,5.
+     Im Hellmodus liegen Orange und Aqua unter 3:1 Kontrast zur Fläche -- deshalb
+     trägt jedes Diagramm eine direkte Beschriftung am Kurvenende und lässt sich
+     als Tabelle anzeigen. */
+  --serie-1: #2a78d6;
+  --serie-2: #eb6834;
+  --serie-3: #1baf7a;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -29,6 +40,10 @@
     --gefahr: #f87171;
     --gut: #4ade80;
     --test: #a78bfa;
+
+    --serie-1: #3987e5;
+    --serie-2: #d95926;
+    --serie-3: #199e70;
   }
 }
 
@@ -43,6 +58,9 @@
   --color-gefahr: var(--gefahr);
   --color-gut: var(--gut);
   --color-test: var(--test);
+  --color-serie-1: var(--serie-1);
+  --color-serie-2: var(--serie-2);
+  --color-serie-3: var(--serie-3);
 }
 
 html {

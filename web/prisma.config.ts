@@ -23,6 +23,11 @@ export default defineConfig({
     path: "prisma/migrations",
   },
 
+  // Jede Tabelle, die Alembic verwaltet, muss hier stehen. Fehlt eine, bietet
+  // `prisma migrate dev` an, *beide* Schemata zurückzusetzen -- also die gesamte
+  // Messreihe zu löschen. Der Test test_prisma_external_tables.py auf der
+  // Serverseite vergleicht diese Liste mit den SQLAlchemy-Modellen und schlägt
+  // fehl, sobald eine neue Tabelle fehlt.
   tables: {
     external: [
       "wetter.station",
@@ -34,6 +39,7 @@ export default defineConfig({
       "wetter.model",
       "wetter.forecast",
       "wetter.verification",
+      "wetter.bias_mapping",
       "wetter.alembic_version",
     ],
   },
