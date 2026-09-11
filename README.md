@@ -35,12 +35,14 @@ Meeresniveau, Taupunkt, Windkomponenten — dient genau diesem Zweck.
 | MQTT-Ingest, Befehlswarteschlange | fertig, Ende zu Ende geprüft |
 | PWA: Jetzt, Verlauf, Vorhersage, Güte, Sensoren | fertig |
 | Deployment: Compose, Mosquitto, install.sh | fertig |
-| Firmware: Ringpuffer, Windfahne, Sensorverwaltung | fertig, 38 Host-Tests |
-| Firmware: ESP-IDF-Treiber, MQTT, Energieverwaltung | offen |
+| Firmware: Ringpuffer, Windfahne, Sensorverwaltung | fertig, host-getestet |
+| Firmware: BME280, Impulszählung, Energieverwaltung | fertig, host-getestet |
+| Firmware: WLAN, MQTT, Zeitabgleich, Hauptprogramm | fertig, übersetzt |
+| Firmware: MLX90614, AS3935, BH1750, INA219 | offen |
 | Web-Push-Warnungen, Service Worker | offen |
 
-**263 Server-Tests** (davon rund 70 gegen echtes Postgres) und **38 Host-Tests** in
-der Firmware, alles in der CI.
+**263 Server-Tests** (davon rund 70 gegen echtes Postgres) und **71 Host-Tests** in
+der Firmware. Die CI übersetzt zusätzlich die vollständige Firmware gegen ESP-IDF.
 
 ## Gemessene Güte
 
@@ -97,7 +99,20 @@ python3 -m venv .venv && ./.venv/bin/pip install -e '.[dev]'
 
 # Firmware-Logik (braucht kein ESP-IDF)
 cd firmware/tests && make check
+
+# Firmware übersetzen (braucht ESP-IDF v5.5)
+. ~/esp/esp-idf/export.sh
+cd firmware/station
+cp main/config.example.h main/config.h   # und ausfüllen
+idf.py build
+idf.py -p /dev/ttyUSB0 flash monitor
+
+# Weboberfläche
+cd web && npm run dev
 ```
+
+Die Zugangsdaten für `config.h` liefert `./install.sh station` auf dem Server, samt
+der richtigen IP.
 
 ## Datenquelle
 
