@@ -35,6 +35,10 @@ MAX_PARAMS = 65535
 PARAM_MARGIN = 0.9
 
 
+#: Name der temporären Übergabetabelle. Sie verschwindet mit dem Commit.
+TEMP_TABLE = "dwd_hourly_import"
+
+
 def chunk_size(columns: int) -> int:
     """Zeilen je Anweisung, abgeleitet aus der Spaltenzahl.
 
@@ -93,35 +97,59 @@ def save_bootstrap(session: Session, result: BootstrapResult) -> int:
         )
     )
 
-    frame = result.frame
+    return _copy_hourly(session, result.frame)
+
+
+def _copy_hourly(session: Session, frame: pd.DataFrame) -> int:
+    """Schreibt die Stundenwerte per COPY über eine temporäre Tabelle.
+
+    Der naheliegende Weg -- Zeilen in Python zusammenbauen und als INSERT schicken --
+    ist hier die falsche Wahl. Beim ersten Bootstrap sind es rund 272.000 Zeilen mit
+    zwanzig Spalten; das sind 5,4 Millionen Einzelwerte, die einzeln auf Fehlwerte
+    geprüft und in Parameter verwandelt werden wollen. Gemessen hing der Import
+    dabei minutenlang bei voller CPU-Last, während die Datenbank auf den Client
+    wartete.
+
+    COPY schiebt denselben Datenbestand als einen Textstrom hinüber. Weil COPY kein
+    ON CONFLICT kennt, geht es über eine temporäre Tabelle: hineinkopieren, dann in
+    einem Rutsch mit Upsert übernehmen. Die temporäre Tabelle verschwindet mit der
+    Sitzung von selbst.
+    """
     if frame.empty:
         return 0
 
     nutzbar = [c for c in DWD_COLUMNS if c in frame.columns]
-    # +1 für die Zeitspalte, die in jeder Zeile mitgeht.
-    block = chunk_size(len(nutzbar) + 1)
-    gesamt = 0
-    for start in range(0, len(frame), block):
-        teil = frame.iloc[start : start + block]
-        zeilen = [
-            {
-                "time": zeit.to_pydatetime(),
-                **{
-                    c: (None if pd.isna(reihe[c]) else float(reihe[c]))
-                    for c in nutzbar
-                },
-            }
-            for zeit, reihe in teil.iterrows()
-        ]
-        stmt = insert(DwdHourly).values(zeilen)
-        session.execute(
-            stmt.on_conflict_do_update(
-                index_elements=[DwdHourly.time],
-                set_={c: getattr(stmt.excluded, c) for c in nutzbar},
-            )
-        )
-        gesamt += len(zeilen)
+    spalten = ["time", *nutzbar]
 
+    roh = session.connection().connection
+    with roh.cursor() as cur:
+        # Vorher wegräumen statt auf ON COMMIT DROP zu bauen: wird der Import
+        # zweimal in derselben Transaktion aufgerufen, steht die Tabelle noch.
+        cur.execute(f"DROP TABLE IF EXISTS {TEMP_TABLE}")
+        cur.execute(
+            f"CREATE TEMP TABLE {TEMP_TABLE} "
+            f"(LIKE {DwdHourly.__table__.schema}.dwd_hourly INCLUDING DEFAULTS) "
+            "ON COMMIT DROP"
+        )
+        spaltenliste = ", ".join(f'"{c}"' for c in spalten)
+        with cur.copy(
+            f"COPY {TEMP_TABLE} ({spaltenliste}) FROM STDIN"
+        ) as copy:
+            # Vektorisiert statt Zelle für Zelle: erst alles auf object-Spalten mit
+            # None für Fehlwerte, dann als Tupel hinüber.
+            teil = frame[nutzbar].astype(object).where(frame[nutzbar].notna(), None)
+            zeiten = frame.index.to_pydatetime()
+            for zeit, werte in zip(zeiten, teil.itertuples(index=False), strict=True):
+                copy.write_row((zeit, *werte))
+
+        gesetzt = ", ".join(f'"{c}" = EXCLUDED."{c}"' for c in nutzbar)
+        cur.execute(
+            f"INSERT INTO {DwdHourly.__table__.schema}.dwd_hourly ({spaltenliste}) "
+            f"SELECT {spaltenliste} FROM {TEMP_TABLE} "
+            f"ON CONFLICT (time) DO UPDATE SET {gesetzt}"
+        )
+
+    gesamt = len(frame)
     log.info("DWD: %d Stundenwerte abgelegt", gesamt)
     return gesamt
 

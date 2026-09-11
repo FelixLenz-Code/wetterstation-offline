@@ -28,6 +28,7 @@ from sqlalchemy.orm import Session
 
 from wetter.db.models import Hourly, Measurement, Station
 from wetter.db.sensors import StateInterval, mask_by_state
+from wetter.dwd.store import chunk_size
 from wetter.features import meteo
 
 log = logging.getLogger(__name__)
@@ -200,17 +201,24 @@ def write_hourly(session: Session, station: Station, frame: pd.DataFrame) -> int
         zeile["sample_count"] = int(reihe.get("sample_count", 0) or 0)
         zeilen.append(zeile)
 
-    stmt = insert(Hourly).values(zeilen)
-    aktualisiere = {
-        c: getattr(stmt.excluded, c)
-        for c in spalten
-        if c not in ("station_id", "time")
-    }
-    session.execute(
-        stmt.on_conflict_do_update(
-            index_elements=[Hourly.station_id, Hourly.time], set_=aktualisiere
+    # Blockweise schreiben: eine Postgres-Anweisung darf höchstens 65.535 Parameter
+    # tragen. Im laufenden Betrieb sind es nur ein paar Stunden auf einmal, aber ein
+    # Nachrechnen über Monate würde die Grenze sonst reissen -- und zwar erst beim
+    # Nutzer, weil im Test niemand Monate nachrechnet.
+    block = chunk_size(len(spalten))
+    for start in range(0, len(zeilen), block):
+        teil = zeilen[start : start + block]
+        stmt = insert(Hourly).values(teil)
+        aktualisiere = {
+            c: getattr(stmt.excluded, c)
+            for c in spalten
+            if c not in ("station_id", "time")
+        }
+        session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=[Hourly.station_id, Hourly.time], set_=aktualisiere
+            )
         )
-    )
     return len(zeilen)
 
 
