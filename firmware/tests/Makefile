@@ -17,12 +17,13 @@ LDLIBS  := -lm
 SRC_DIR := ../station/components
 BIN     := build
 
-TESTS := ringbuffer wind_vane sensor_registry bme280
+TESTS := ringbuffer wind_vane sensor_registry bme280 pulse_convert
 
 SRC_ringbuffer      := $(SRC_DIR)/buffer/ringbuffer.c
 SRC_wind_vane       := $(SRC_DIR)/sensors/wind_vane.c
 SRC_sensor_registry := $(SRC_DIR)/sensors/sensor_registry.c
 SRC_bme280          := $(SRC_DIR)/sensors/bme280_compensate.c
+SRC_pulse_convert   := $(SRC_DIR)/sensors/pulse_convert.c
 
 BINS := $(addprefix $(BIN)/test_,$(TESTS))
 

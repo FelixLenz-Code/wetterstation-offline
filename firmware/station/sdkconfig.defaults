@@ -1,0 +1,57 @@
+# Voreinstellungen der Aussenstation.
+#
+# Was hier steht, ist nicht Geschmack, sondern folgt aus dem Solarbetrieb und
+# daraus, dass die Station auf einem Mast haengt und nicht neu gestartet werden kann.
+
+CONFIG_IDF_TARGET="esp32"
+
+# --- Partitionen ---
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# --- Energie ---
+# Dynamische Taktanpassung mit automatischem Light-Sleep. Das ist der Kern des
+# Solarbetriebs: zwischen den Messungen faellt der Takt, das Funkteil schlaeft,
+# und ein Reed-Impuls weckt den Kern ueber einen GPIO-Interrupt. So gehen keine
+# Wind- oder Regenimpulse verloren, und der mittlere Verbrauch bleibt im
+# einstelligen Milliampere-Bereich.
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+CONFIG_PM_DFS_INIT_AUTO=y
+CONFIG_ESP32_DEFAULT_CPU_FREQ_80=y
+
+# Der Empfaenger darf zwischen den Beacons schlafen. Bei DTIM 3 sind das rund
+# 300 ms am Stueck -- der groesste einzelne Sparposten ueberhaupt.
+CONFIG_ESP_WIFI_SLP_IRAM_OPT=y
+CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y
+
+# --- Zeit ---
+# Der interne RTC laeuft ohne externen Quarz auf einem RC-Oszillator und driftet
+# um Prozente. Fuer gepufferte Daten ist das unbrauchbar: ein Datensatz mit
+# falschem Zeitstempel ist schlimmer als keiner, weil er die Merkmalsberechnung
+# still verfaelscht. Der externe 32-kHz-Quarz bringt das auf rund 20 ppm.
+CONFIG_RTC_CLK_SRC_EXT_CRYS=y
+CONFIG_RTC_CLK_CAL_CYCLES=3000
+
+# --- Robustheit ---
+# Ein Watchdog, der wirklich neu startet. Eine haengende Station auf dem Mast
+# merkt sonst niemand, bis die Daten ausbleiben.
+CONFIG_ESP_TASK_WDT_EN=y
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=30
+CONFIG_ESP_INT_WDT=y
+
+# Bei einem Absturz neu starten statt in der Schleife stehenzubleiben.
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# --- OTA ---
+# Ein neues Abbild gilt erst als gut, wenn es sich selbst dafuer erklaert. Bleibt
+# es beim Start haengen, faellt der Bootloader auf die vorige Fassung zurueck.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+
+# --- MQTT ---
+CONFIG_MQTT_PROTOCOL_311=y
+
+# --- Log ---
+# Im Betrieb reicht die Warnstufe; die serielle Ausgabe kostet Zeit und Strom.
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y

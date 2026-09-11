@@ -1,0 +1,22 @@
+# Partitionen der Aussenstation.
+#
+# Die Besonderheit ist "messdaten": eine eigene Partition fuer den
+# Store-and-Forward-Ringpuffer. Ein Dateisystem waere hier fehl am Platz -- der
+# Puffer schreibt feste Plaetze und zieht seinen Zustand aus einem Zustandsbyte
+# je Platz, das nur Bits loescht. Ein Dateisystem brauchte dafuer Metadaten, die
+# bei jedem Schreibvorgang mitgepflegt werden muessten, und genau die waeren die
+# erste Stelle, an der ein Stromausfall Schaden anrichtet.
+#
+# 1 MB bei 32 Byte je Datensatz sind rund 32.000 Datensaetze, also gut drei Wochen
+# im Minutentakt.
+#
+# Zwei OTA-Partitionen, weil ein Update an einer Station auf dem Mast keine zweite
+# Chance hat: schlaegt es fehl, startet der Bootloader die alte Fassung.
+# Name,     Typ,  Subtyp,   Offset,   Groesse,  Flags
+nvs,        data, nvs,      0x9000,   0x6000,
+phy_init,   data, phy,      0xf000,   0x1000,
+factory,    app,  factory,  0x10000,  1500K,
+ota_0,      app,  ota_0,    ,         1500K,
+ota_1,      app,  ota_1,    ,         1500K,
+otadata,    data, ota,      ,         0x2000,
+messdaten,  data, 0x40,     ,         1M,
