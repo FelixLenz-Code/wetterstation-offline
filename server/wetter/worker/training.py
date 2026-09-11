@@ -44,6 +44,11 @@ log = logging.getLogger(__name__)
 #: dass es Sommer ist.
 MIN_OWN_HOURS_FINETUNE = 4380
 
+#: Soviel Anteil gefüllter Stunden muss eine Spalte haben, damit auf ihr trainiert
+#: wird. Zehn Prozent klingt wenig, trennt aber zuverlässig einen laufenden Sensor
+#: von einer Spalte, in der nur ein paar Werkstattwerte stehen.
+MIN_COLUMN_COVERAGE = 0.10
+
 #: Merkmale, die es nur bei der eigenen Station gibt. Beim Training auf DWD-Daten
 #: sind sie durchgehend leer und würden das Modell nur aufblähen.
 OWN_ONLY_FEATURES = ("lightning_count_1h", "lightning_min_distance_km")
@@ -59,6 +64,8 @@ class TrainingReport:
     bias_columns: list[str] = field(default_factory=list)
     models: list[int] = field(default_factory=list)
     skipped: list[str] = field(default_factory=list)
+    feature_columns: list[str] = field(default_factory=list)
+    """Messgrößen, auf denen trainiert wurde -- also die, die die Station liefert."""
 
     def summary(self) -> str:
         teile = [
@@ -70,7 +77,28 @@ class TrainingReport:
             teile.append("feinjustiert")
         if self.bias_columns:
             teile.append(f"Bias-Korrektur für {', '.join(self.bias_columns)}")
+        if self.feature_columns:
+            teile.append(f"{len(self.feature_columns)} Messgrößen von der Station")
         return ", ".join(teile)
+
+
+def delivered_columns(own: pd.DataFrame) -> list[str]:
+    """Welche Messgrößen die Station tatsächlich liefert.
+
+    Nicht am Datenbankschema ablesbar, sondern nur an den Daten: die Spalte
+    ``global_radiation_wm2`` gibt es in der Stundentabelle immer, aber solange kein
+    Strahlungssensor angeschlossen ist, steht dort nie ein Wert. Trainiert man auf
+    diesem Merkmal, lernt das Modell Trennungen, die es im Betrieb nie anwenden kann.
+
+    Verlangt wird ein Mindestanteil gefüllter Stunden statt bloss eines einzigen
+    Werts -- ein Sensor, der eine Stunde lang lief und dann abgeklemmt wurde, ist
+    für das Training wertlos, und ein halber Tag Werkstattdaten soll kein Merkmal
+    freischalten.
+    """
+    if own.empty:
+        return []
+    anteil = own.notna().mean()
+    return [c for c in own.columns if float(anteil.get(c, 0.0)) >= MIN_COLUMN_COVERAGE]
 
 
 def load_own_hourly(session: Session, station: Station) -> pd.DataFrame:
@@ -138,7 +166,13 @@ def train_for_station(
     # keinen Sensor und in der Stundentabelle nicht einmal eine Spalte. Ein Modell,
     # das darauf lernt, bekommt sie im Betrieb dauerhaft als NaN -- es hat
     # Trennungen gelernt, die es nie wieder anwenden kann.
-    lieferbar = usable_features(list(HOURLY_COLUMNS))
+    # Was die Station wirklich liefert, steht in ihren Daten -- nicht im Schema.
+    # Solange noch gar keine eigenen Daten da sind, wird optimistisch von allen
+    # Spalten ausgegangen; der erste Trainingslauf nach den ersten Messungen zieht
+    # das von selbst gerade.
+    geliefert = delivered_columns(eigene) or list(HOURLY_COLUMNS)
+    lieferbar = usable_features(geliefert)
+    bericht.feature_columns = sorted(geliefert)
     merkmale = _features(dwd, station, klimatologie, erlaubt=lieferbar)
     ziele = build_targets(dwd)
     split = TimeSplit.by_fraction(merkmale.index)

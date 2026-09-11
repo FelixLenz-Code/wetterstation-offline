@@ -20,6 +20,7 @@ from wetter.models.registry import STATUS_SHADOW
 from wetter.worker.training import (
     MIN_OWN_HOURS_FINETUNE,
     OWN_ONLY_FEATURES,
+    delivered_columns,
     load_own_hourly,
     needs_training,
     train_for_station,
@@ -170,6 +171,43 @@ def test_eigene_stunden_werden_lueckenlos_gelesen(session, station):
     gelesen = load_own_hourly(session, station)
     assert len(gelesen) == 200
     assert gelesen["temperature_c"].isna().sum() == 2
+
+
+def test_gelieferte_spalten_aus_den_daten_statt_dem_schema():
+    """Eine Spalte, die es gibt, aber nie gefüllt wird, zählt nicht.
+
+    Die Stundentabelle führt global_radiation_wm2 immer -- solange kein
+    Strahlungssensor angeschlossen ist, steht dort aber nie ein Wert. Trainierte man
+    darauf, lernte das Modell Trennungen, die es im Betrieb nie anwenden kann.
+    """
+    idx = pd.date_range(START, periods=1000, freq="h", tz="UTC")
+    frame = pd.DataFrame(
+        {
+            "temperature_c": np.arange(1000, dtype=float),
+            "global_radiation_wm2": np.full(1000, np.nan),
+            # Ein Sensor, der eine Stunde lief und dann abging: zu wenig zum Lernen.
+            "sky_temp_c": [(-30.0 if i < 5 else np.nan) for i in range(1000)],
+        },
+        index=idx,
+    )
+    geliefert = delivered_columns(frame)
+    assert "temperature_c" in geliefert
+    assert "global_radiation_wm2" not in geliefert
+    assert "sky_temp_c" not in geliefert
+
+
+def test_ohne_eigene_daten_gilt_alles_als_lieferbar():
+    """Am ersten Tag gibt es nichts zu messen -- dann optimistisch annehmen."""
+    assert delivered_columns(pd.DataFrame()) == []
+
+
+def test_trainingsbericht_nennt_die_genutzten_messgroessen(session, station, tmp_path):
+    _dwd_einspielen(session, kunstreihe(3000))
+    _eigene_einspielen(session, station, kunstreihe(1200))
+    bericht = train_for_station(session, station, root=tmp_path, **KLEIN)
+    assert "temperature_c" in bericht.feature_columns
+    # Spalten, die die Kunstreihe nicht führt, tauchen nicht auf.
+    assert "sky_temp_c" not in bericht.feature_columns
 
 
 def test_training_ist_faellig_wenn_nie_gelaufen(session):
