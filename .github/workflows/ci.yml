@@ -84,3 +84,30 @@ jobs:
       - name: Tests bauen und ausführen
         working-directory: firmware/tests
         run: make check
+
+  firmware-build:
+    name: Firmware übersetzen (ESP-IDF)
+    runs-on: ubuntu-latest
+    # Das offizielle Abbild bringt Toolchain und SDK mit. Es selbst zu
+    # installieren dauert in der CI länger als der ganze Bau.
+    container: espressif/idf:v5.5.5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Übersetzen
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/station
+          # Die echten Zugangsdaten liegen nicht im Repository; für den Bau
+          # genügt die Vorlage.
+          cp main/config.example.h main/config.h
+          idf.py build
+
+      - name: Größe prüfen
+        shell: bash
+        run: |
+          . "$IDF_PATH/export.sh"
+          cd firmware/station
+          idf.py size
