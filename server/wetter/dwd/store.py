@@ -25,10 +25,28 @@ DWD_COLUMNS: tuple[str, ...] = tuple(
     c.name for c in DwdHourly.__table__.columns if c.name != "time"
 )
 
-#: Soviele Zeilen gehen auf einmal in die Datenbank. Bei 600.000 Stunden sind das
-#: rund 120 Durchgänge -- gross genug, um schnell zu sein, klein genug, damit die
-#: Anweisung nicht das Parameterlimit von Postgres sprengt.
-CHUNK = 5000
+#: Harte Grenze des Postgres-Protokolls: eine Anweisung darf höchstens 65.535
+#: Parameter tragen. Das ist keine Einstellung, sondern ein 16-Bit-Feld im
+#: Wire-Protokoll.
+MAX_PARAMS = 65535
+
+#: Sicherheitsabstand, damit zusätzliche Parameter (etwa aus einem ON CONFLICT mit
+#: Bedingung) nicht über die Grenze schieben.
+PARAM_MARGIN = 0.9
+
+
+def chunk_size(columns: int) -> int:
+    """Zeilen je Anweisung, abgeleitet aus der Spaltenzahl.
+
+    Eine feste Zahl ist hier eine Falle: 5000 Zeilen sind bei fünf Spalten
+    unauffällig und sprengen bei zwanzig das Parameterlimit. Der Fehler zeigt sich
+    dann auch nicht im Test mit einer kurzen Kunstreihe, sondern erst beim ersten
+    echten Bootstrap mit allen Messgrößen -- und der läuft beim Nutzer, nicht auf
+    dem Entwicklungsrechner.
+    """
+    if columns <= 0:
+        return 1
+    return max(1, int(MAX_PARAMS * PARAM_MARGIN) // columns)
 
 
 def save_bootstrap(session: Session, result: BootstrapResult) -> int:
@@ -80,9 +98,11 @@ def save_bootstrap(session: Session, result: BootstrapResult) -> int:
         return 0
 
     nutzbar = [c for c in DWD_COLUMNS if c in frame.columns]
+    # +1 für die Zeitspalte, die in jeder Zeile mitgeht.
+    block = chunk_size(len(nutzbar) + 1)
     gesamt = 0
-    for start in range(0, len(frame), CHUNK):
-        teil = frame.iloc[start : start + CHUNK]
+    for start in range(0, len(frame), block):
+        teil = frame.iloc[start : start + block]
         zeilen = [
             {
                 "time": zeit.to_pydatetime(),
