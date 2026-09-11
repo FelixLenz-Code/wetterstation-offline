@@ -1,0 +1,118 @@
+# Wetterstation -- vollständiger Stack.
+#
+# Portkonvention wie in deinen übrigen Projekten: APP_PORT und BIND_ADDR aus der
+# .env, Standard ist 127.0.0.1 -- die App ist also zunächst nur lokal erreichbar.
+# Der MQTT-Broker ist die Ausnahme: an den muss die Station aus dem WLAN kommen,
+# er bindet deshalb standardmäßig auf alle Schnittstellen.
+
+name: wetterstation
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-wetter}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-wetter}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # Nur lokal gebunden: die Datenbank hat im Netz nichts verloren.
+    ports:
+      - "127.0.0.1:${DB_PORT:-55432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-wetter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [innen]
+
+  mqtt:
+    image: eclipse-mosquitto:2
+    restart: unless-stopped
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - mqtt-data:/mosquitto/data
+    # Die Station muss aus dem WLAN hierher kommen -- deshalb nicht nur localhost.
+    ports:
+      - "${MQTT_BIND:-0.0.0.0}:${MQTT_PORT:-1883}:1883"
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_sub -t '$$SYS/#' -C 1 -W 3 -u ${MQTT_USER:-station} -P ${MQTT_PASSWORD} || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    networks: [innen, aussen]
+
+  ingest:
+    image: ghcr.io/felixlenz-code/wetterstation-server:${IMAGE_TAG:-latest}
+    build:
+      context: ./server
+    restart: unless-stopped
+    command: ["wetter-ingest"]
+    environment: &server-env
+      WETTER_DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-wetter}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
+      WETTER_MQTT_HOST: mqtt
+      WETTER_MQTT_PORT: "1883"
+      WETTER_MQTT_USERNAME: ${MQTT_USER:-station}
+      WETTER_MQTT_PASSWORD: ${MQTT_PASSWORD}
+      WETTER_MODEL_ROOT: /var/lib/wetter/models
+      TZ: ${TZ:-Europe/Berlin}
+    volumes:
+      - model-data:/var/lib/wetter/models
+    depends_on:
+      db: {condition: service_healthy}
+      mqtt: {condition: service_started}
+    networks: [innen]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  worker:
+    image: ghcr.io/felixlenz-code/wetterstation-server:${IMAGE_TAG:-latest}
+    build:
+      context: ./server
+    restart: unless-stopped
+    command: ["wetter-worker"]
+    environment: *server-env
+    volumes:
+      - model-data:/var/lib/wetter/models
+    depends_on:
+      db: {condition: service_healthy}
+    # Der Worker braucht Internet für den DWD-Bootstrap. Alles danach läuft offline;
+    # fällt die Verbindung aus, arbeitet er mit den abgelegten Daten weiter.
+    networks: [innen, aussen]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+  web:
+    image: ghcr.io/felixlenz-code/wetterstation-web:${IMAGE_TAG:-latest}
+    build:
+      context: ./web
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-wetter}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-wetter}
+      TZ: ${TZ:-Europe/Berlin}
+    ports:
+      - "${BIND_ADDR:-127.0.0.1}:${APP_PORT:-3000}:3000"
+    depends_on:
+      db: {condition: service_healthy}
+    networks: [innen]
+    read_only: true
+    tmpfs: [/tmp]
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+
+volumes:
+  db-data:
+  mqtt-data:
+  model-data:
+
+networks:
+  # Datenbank, Broker und Dienste unter sich -- kein Weg ins Internet.
+  innen:
+    internal: true
+  # Nur für das, was wirklich nach draußen muss: der DWD-Import und der
+  # MQTT-Zugang der Station.
+  aussen:
