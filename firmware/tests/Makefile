@@ -1,9 +1,13 @@
 # Host-Tests der reinen Rechenlogik -- laufen ohne ESP-IDF und ohne Hardware.
 #
 # Alles, was hier getestet wird, ist bewusst frei von ESP-Abhaengigkeiten:
-# Ringpuffer, Windfahnen-Kennlinie und die meteorologischen Umrechnungen. Genau
-# das sind die Teile, in denen sich Fehler still verstecken -- ein falscher
-# Taupunkt faellt am Geraet niemandem auf, hier schon.
+# Ringpuffer, Windfahnen-Kennlinie, Sensorverwaltung und die Kompensationsrechnung
+# des BME280. Genau das sind die Teile, in denen sich Fehler still verstecken --
+# eine um 22,5 Grad verdrehte Windrichtung oder eine um zehn Prozent danebenliegende
+# Feuchte faellt am Geraet niemandem auf, hier schon.
+#
+# Neuen Test hinzufuegen: Namen an TESTS anhaengen und die Quellen unter
+# SRC_<name> eintragen. Die Regel unten baut daraus automatisch.
 
 CC      ?= gcc
 CFLAGS  := -std=c11 -Wall -Wextra -Werror -O2 -g
@@ -13,24 +17,28 @@ LDLIBS  := -lm
 SRC_DIR := ../station/components
 BIN     := build
 
-TESTS := $(BIN)/test_ringbuffer $(BIN)/test_wind_vane $(BIN)/test_sensor_registry
+TESTS := ringbuffer wind_vane sensor_registry bme280
+
+SRC_ringbuffer      := $(SRC_DIR)/buffer/ringbuffer.c
+SRC_wind_vane       := $(SRC_DIR)/sensors/wind_vane.c
+SRC_sensor_registry := $(SRC_DIR)/sensors/sensor_registry.c
+SRC_bme280          := $(SRC_DIR)/sensors/bme280_compensate.c
+
+BINS := $(addprefix $(BIN)/test_,$(TESTS))
 
 .PHONY: all check clean
-all: $(TESTS)
+all: $(BINS)
 
-check: $(TESTS)
-	@fail=0; for t in $(TESTS); do ./$$t || fail=1; done; exit $$fail
+check: $(BINS)
+	@fail=0; for t in $(BINS); do ./$$t || fail=1; done; exit $$fail
 
 $(BIN):
 	@mkdir -p $(BIN)
 
-$(BIN)/test_ringbuffer: test_ringbuffer.c $(SRC_DIR)/buffer/ringbuffer.c | $(BIN)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-$(BIN)/test_wind_vane: test_wind_vane.c $(SRC_DIR)/sensors/wind_vane.c | $(BIN)
-	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
-
-$(BIN)/test_sensor_registry: test_sensor_registry.c $(SRC_DIR)/sensors/sensor_registry.c | $(BIN)
+# Jeder Test besteht aus seiner eigenen Datei plus den Quellen aus SRC_<name>.
+# Die zweite Expansion ist noetig, damit $* im Variablennamen ankommt.
+.SECONDEXPANSION:
+$(BIN)/test_%: test_%.c $$(SRC_%) | $(BIN)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
