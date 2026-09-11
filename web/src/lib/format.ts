@@ -6,11 +6,16 @@
 
 const ZEITZONE = process.env.TZ ?? "Europe/Berlin";
 
-export function zahl(wert: number | null | undefined, stellen = 1): string {
+export function zahl(
+  wert: number | null | undefined,
+  stellen = 1,
+  gruppierung = true,
+): string {
   if (wert === null || wert === undefined || !Number.isFinite(wert)) return "–";
   return wert.toLocaleString("de-DE", {
     minimumFractionDigits: stellen,
     maximumFractionDigits: stellen,
+    useGrouping: gruppierung,
   });
 }
 
@@ -19,7 +24,9 @@ export function temperatur(wert: number | null | undefined): string {
 }
 
 export function druck(wert: number | null | undefined): string {
-  return wert === null || wert === undefined ? "–" : `${zahl(wert, 1)} hPa`;
+  // Ohne Tausendertrennzeichen: Luftdruck schreibt man 1019,6 hPa, nicht
+  // 1.019,6 hPa -- die Gruppierung liest sich hier wie ein Tippfehler.
+  return wert === null || wert === undefined ? "–" : `${zahl(wert, 1, false)} hPa`;
 }
 
 export function prozent(anteil: number | null | undefined, stellen = 0): string {
