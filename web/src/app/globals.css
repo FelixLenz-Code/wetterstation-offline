@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+/* Farbpalette bewusst zurückhaltend: die Zahlen sollen wirken, nicht die
+   Oberfläche. Ein einziger Akzent (Blau) markiert das Aktive, Warnfarben bleiben
+   für echte Warnungen reserviert -- wer Frost und Sturm in Rot anzeigt, darf
+   nicht gleichzeitig jede Schaltfläche rot machen. */
+:root {
+  --grund: #ffffff;
+  --grund-erhoben: #f6f7f9;
+  --rand: #e3e6ea;
+  --schrift: #14181d;
+  --schrift-leise: #5b656f;
+  --akzent: #1f6feb;
+  --warn: #b45309;
+  --gefahr: #b42318;
+  --gut: #15803d;
+  --test: #7c3aed;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --grund: #0e1116;
+    --grund-erhoben: #161b22;
+    --rand: #2a313a;
+    --schrift: #e6edf3;
+    --schrift-leise: #8b949e;
+    --akzent: #4f9cf9;
+    --warn: #d99a2b;
+    --gefahr: #f87171;
+    --gut: #4ade80;
+    --test: #a78bfa;
+  }
+}
+
+@theme inline {
+  --color-grund: var(--grund);
+  --color-grund-erhoben: var(--grund-erhoben);
+  --color-rand: var(--rand);
+  --color-schrift: var(--schrift);
+  --color-schrift-leise: var(--schrift-leise);
+  --color-akzent: var(--akzent);
+  --color-warn: var(--warn);
+  --color-gefahr: var(--gefahr);
+  --color-gut: var(--gut);
+  --color-test: var(--test);
+}
+
+html {
+  color-scheme: light dark;
+}
+
+body {
+  background: var(--grund);
+  color: var(--schrift);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  /* Auf dem Handy soll nichts unter der Systemleiste verschwinden. */
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Messwerte gehören in Tabellenziffern, sonst zappeln sie beim Aktualisieren. */
+.zahl {
+  font-variant-numeric: tabular-nums;
+}

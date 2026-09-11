@@ -1,0 +1,252 @@
+generator client {
+  provider = "prisma-client-js"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["app", "wetter"]
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+
+  @@schema("wetter")
+}
+
+model dwd_hourly {
+  time                   DateTime @id(map: "pk_dwd_hourly") @db.Timestamptz(6)
+  temperature_c          Float?
+  humidity_pct           Float?
+  pressure_sea_hpa       Float?
+  pressure_station_hpa   Float?
+  dewpoint_c             Float?
+  precip_mm              Float?
+  precip_indicator       Float?
+  wind_speed_ms          Float?
+  wind_dir_deg           Float?
+  wind_gust_ms           Float?
+  cloud_cover_okta       Float?
+  sunshine_min           Float?
+  visibility_m           Float?
+  global_radiation_jcm2  Float?
+  diffuse_radiation_jcm2 Float?
+  atmo_radiation_jcm2    Float?
+  vapour_pressure_hpa    Float?
+  wetbulb_c              Float?
+  abs_humidity_gm3       Float?
+
+  @@index([time], map: "ix_dwd_hourly_time_brin", type: Brin)
+  @@schema("wetter")
+}
+
+model dwd_station {
+  dataset_key String    @id(map: "pk_dwd_station") @db.VarChar(4)
+  station_id  Int
+  name        String    @db.VarChar(128)
+  latitude    Float
+  longitude   Float
+  altitude_m  Float
+  distance_km Float
+  imported_at DateTime  @db.Timestamptz(6)
+  first_time  DateTime? @db.Timestamptz(6)
+  last_time   DateTime? @db.Timestamptz(6)
+
+  @@schema("wetter")
+}
+
+model forecast {
+  id           BigInt        @id(map: "pk_forecast") @default(autoincrement())
+  model_id     BigInt
+  station_id   Int
+  issued_at    DateTime      @db.Timestamptz(6)
+  valid_at     DateTime      @db.Timestamptz(6)
+  target       String        @db.VarChar(32)
+  value        Float?
+  quantiles    Json?
+  model        model         @relation(fields: [model_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_forecast_model_id_model")
+  station      station       @relation(fields: [station_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_forecast_station_id_station")
+  verification verification?
+
+  @@unique([model_id, issued_at, valid_at, target], map: "uq_forecast_model_id")
+  @@index([valid_at, target], map: "ix_forecast_valid")
+  @@schema("wetter")
+}
+
+model hourly {
+  station_id            Int
+  time                  DateTime @db.Timestamptz(6)
+  temperature_c         Float?
+  humidity_pct          Float?
+  pressure_station_hpa  Float?
+  pressure_sea_hpa      Float?
+  dewpoint_c            Float?
+  wind_speed_ms         Float?
+  wind_gust_ms          Float?
+  wind_dir_deg          Float?
+  precip_mm             Float?
+  cloud_cover_okta      Float?
+  sky_temp_c            Float?
+  global_radiation_wm2  Float?
+  illuminance_lux       Float?
+  lightning_count       Int?
+  lightning_distance_km Float?
+  sample_count          Int
+  station               station  @relation(fields: [station_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_hourly_station_id_station")
+
+  @@id([station_id, time], map: "pk_hourly")
+  @@index([time], map: "ix_hourly_time_brin", type: Brin)
+  @@schema("wetter")
+}
+
+model measurement {
+  station_id            Int
+  time                  DateTime @db.Timestamptz(6)
+  seq                   BigInt?
+  temperature_c         Float?
+  humidity_pct          Float?
+  pressure_station_hpa  Float?
+  wind_speed_ms         Float?
+  wind_gust_ms          Float?
+  wind_dir_deg          Float?
+  precip_mm             Float?
+  sky_temp_c            Float?
+  lightning_count       Int?     @db.SmallInt
+  lightning_distance_km Float?
+  illuminance_lux       Float?
+  panel_voltage_v       Float?
+  panel_current_ma      Float?
+  global_radiation_wm2  Float?
+  battery_v             Float?
+  rssi_dbm              Int?     @db.SmallInt
+  power_mode            String?  @db.VarChar(16)
+  station               station  @relation(fields: [station_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_measurement_station_id_station")
+
+  @@id([station_id, time], map: "pk_measurement")
+  @@index([time], map: "ix_measurement_time_brin", type: Brin)
+  @@schema("wetter")
+}
+
+model model {
+  id            BigInt     @id(map: "pk_model") @default(autoincrement())
+  kind          String     @db.VarChar(32)
+  target        String     @db.VarChar(32)
+  lead_hours    Int
+  status        String     @db.VarChar(16)
+  feature_names Json
+  metrics       Json
+  trained_at    DateTime   @db.Timestamptz(6)
+  train_start   DateTime   @db.Timestamptz(6)
+  train_end     DateTime   @db.Timestamptz(6)
+  source        String     @db.VarChar(16)
+  artifact_path String?
+  forecast      forecast[]
+
+  @@index([target, lead_hours, status], map: "ix_model_lookup")
+  @@schema("wetter")
+}
+
+model sensor_state {
+  id         BigInt    @id(map: "pk_sensor_state") @default(autoincrement())
+  station_id Int
+  sensor_key String    @db.VarChar(32)
+  state      String    @db.VarChar(16)
+  valid_from DateTime  @db.Timestamptz(6)
+  valid_to   DateTime? @db.Timestamptz(6)
+  note       String?
+  station    station   @relation(fields: [station_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_sensor_state_station_id_station")
+
+  @@index([station_id, sensor_key, valid_from], map: "ix_sensor_state_lookup")
+  @@schema("wetter")
+}
+
+model station {
+  id           Int            @id(map: "pk_station") @default(autoincrement())
+  key          String         @unique(map: "uq_station_key") @db.VarChar(64)
+  name         String         @db.VarChar(128)
+  latitude     Float
+  longitude    Float
+  altitude_m   Float
+  created_at   DateTime       @db.Timestamptz(6)
+  forecast     forecast[]
+  hourly       hourly[]
+  measurement  measurement[]
+  sensor_state sensor_state[]
+
+  @@schema("wetter")
+}
+
+model verification {
+  forecast_id BigInt   @id(map: "pk_verification")
+  verified_at DateTime @db.Timestamptz(6)
+  observed    Float?
+  scores      Json
+  forecast    forecast @relation(fields: [forecast_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_verification_forecast_id_forecast")
+
+  @@schema("wetter")
+}
+
+// ---------------------------------------------------------------------------
+// Schema `app` -- gehört Prisma. Nur was die Weboberfläche selbst braucht.
+// Alles oberhalb dieser Linie stammt aus `npm run db:pull` und wird von Alembic
+// verwaltet; von Hand geändert wird dort nichts.
+// ---------------------------------------------------------------------------
+
+/// Einstellungen der Oberfläche als Schlüssel-Wert-Paare.
+/// Bewusst kein festes Spaltenschema: hier landen Kleinigkeiten wie die zuletzt
+/// gewählte Zeitspanne im Verlauf, für die eine eigene Migration übertrieben wäre.
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+
+  @@map("app_setting")
+  @@schema("app")
+}
+
+/// Ein Browser, der Warnungen per Web-Push bekommen möchte.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  endpoint  String   @unique
+  p256dh    String
+  auth      String
+  userAgent String?
+  createdAt DateTime @default(now())
+  /// Wann zuletzt erfolgreich zugestellt. Abos, die dauerhaft scheitern, werden
+  /// aufgeräumt -- ein abgemeldeter Browser meldet sich nicht ab, er antwortet
+  /// nur nicht mehr.
+  lastSeen  DateTime?
+  failures  Int      @default(0)
+
+  @@map("push_subscription")
+  @@schema("app")
+}
+
+enum AlertKind {
+  FROST
+  STORM
+  THUNDERSTORM
+  HEAVY_RAIN
+
+  @@schema("app")
+}
+
+/// Wann eine Warnung ausgelöst wird.
+model AlertRule {
+  id         String    @id @default(cuid())
+  kind       AlertKind
+  enabled    Boolean   @default(true)
+  /// Schwelle in der Einheit der Größe: Grad für Frost, m/s für Sturm,
+  /// Kilometer für Gewitterentfernung, Millimeter für Starkregen.
+  threshold  Float
+  /// Wahrscheinlichkeit, ab der gewarnt wird (0..1). Bei Frost etwa 0,3 --
+  /// lieber einmal zu viel die Pflanzen abdecken als einmal zu wenig.
+  minProbability Float @default(0.5)
+  /// Sperrfrist in Minuten, damit dieselbe Lage nicht stündlich erneut meldet.
+  cooldownMinutes Int  @default(360)
+  lastFiredAt DateTime?
+
+  @@unique([kind])
+  @@map("alert_rule")
+  @@schema("app")
+}
