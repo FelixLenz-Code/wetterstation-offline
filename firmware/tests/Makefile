@@ -13,7 +13,7 @@ LDLIBS  := -lm
 SRC_DIR := ../station/components
 BIN     := build
 
-TESTS := $(BIN)/test_ringbuffer $(BIN)/test_wind_vane
+TESTS := $(BIN)/test_ringbuffer $(BIN)/test_wind_vane $(BIN)/test_sensor_registry
 
 .PHONY: all check clean
 all: $(TESTS)
@@ -28,6 +28,9 @@ $(BIN)/test_ringbuffer: test_ringbuffer.c $(SRC_DIR)/buffer/ringbuffer.c | $(BIN
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 $(BIN)/test_wind_vane: test_wind_vane.c $(SRC_DIR)/sensors/wind_vane.c | $(BIN)
+	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
+
+$(BIN)/test_sensor_registry: test_sensor_registry.c $(SRC_DIR)/sensors/sensor_registry.c | $(BIN)
 	$(CC) $(CFLAGS) -o $@ $^ $(LDLIBS)
 
 clean:
