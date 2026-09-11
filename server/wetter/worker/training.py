@@ -27,7 +27,7 @@ from sqlalchemy.orm import Session
 
 from wetter.db.models import Station
 from wetter.dwd.store import load_dwd_hourly
-from wetter.features.build import build_features
+from wetter.features.build import build_features, usable_features
 from wetter.features.climatology import Climatology
 from wetter.features.targets import RAIN_LEADS, build_targets
 from wetter.models.bias import apply_all, fit_all
@@ -132,14 +132,21 @@ def train_for_station(
             eigene = apply_all(eigene, abbildungen)
 
     klimatologie = Climatology.from_hourly(dwd)
-    merkmale = _features(dwd, station, klimatologie)
+
+    # Nur auf Merkmalen trainieren, die die eigene Station auch liefern kann.
+    # Der DWD führt Sonnenscheindauer und Sichtweite; dafür gibt es an der Station
+    # keinen Sensor und in der Stundentabelle nicht einmal eine Spalte. Ein Modell,
+    # das darauf lernt, bekommt sie im Betrieb dauerhaft als NaN -- es hat
+    # Trennungen gelernt, die es nie wieder anwenden kann.
+    lieferbar = usable_features(list(HOURLY_COLUMNS))
+    merkmale = _features(dwd, station, klimatologie, erlaubt=lieferbar)
     ziele = build_targets(dwd)
     split = TimeSplit.by_fraction(merkmale.index)
 
     eigene_merkmale = None
     eigene_ziele = None
     if bericht.own_hours >= min_own_hours:
-        eigene_merkmale = _features(eigene, station, klimatologie)
+        eigene_merkmale = _features(eigene, station, klimatologie, erlaubt=lieferbar)
         eigene_ziele = build_targets(eigene)
         bericht.finetuned = True
     elif bericht.own_hours:
@@ -192,7 +199,10 @@ def train_for_station(
 
 
 def _features(
-    frame: pd.DataFrame, station: Station, climatology: Climatology
+    frame: pd.DataFrame,
+    station: Station,
+    climatology: Climatology,
+    erlaubt: list[str] | None = None,
 ) -> pd.DataFrame:
     merkmale = build_features(
         frame,
@@ -203,7 +213,10 @@ def _features(
     )
     # Blitzmerkmale kennt der DWD nicht; sie blieben durchgehend leer und trügen
     # nichts bei. Sobald der AS3935 läuft, kommen sie über ein eigenes Modell dazu.
-    return merkmale.drop(columns=list(OWN_ONLY_FEATURES), errors="ignore")
+    merkmale = merkmale.drop(columns=list(OWN_ONLY_FEATURES), errors="ignore")
+    if erlaubt is not None:
+        merkmale = merkmale[[c for c in merkmale.columns if c in erlaubt]]
+    return merkmale
 
 
 def _finetune_rain(modell, merkmale: pd.DataFrame, ziel: pd.Series, *, lead: int):

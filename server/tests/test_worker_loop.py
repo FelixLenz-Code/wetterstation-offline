@@ -255,6 +255,20 @@ def test_fehlende_merkmale_werden_gemeldet(session, trainiert, tmp_path):
 # --- Vorhersage und Verifikation --------------------------------------------
 
 
+def test_vorgeschichte_reicht_fuer_das_laengste_merkmal():
+    """Die geladene Vorgeschichte muss den Deckel von hours_since_rain abdecken.
+
+    Sonst kann das Merkmal bei der Inferenz nie so hoch steigen wie im Training,
+    und dasselbe Merkmal bedeutet auf beiden Seiten etwas anderes. Beim Regenmodell
+    ist es das wichtigste überhaupt.
+    """
+    from wetter.features.build import MAX_DRY_HOURS, TENDENCY_HOURS
+    from wetter.worker.forecast import HISTORY_HOURS
+
+    assert HISTORY_HOURS > MAX_DRY_HOURS
+    assert max(TENDENCY_HOURS) < HISTORY_HOURS
+
+
 def test_vorhersagen_werden_ausgestellt(session, gefuellt, trainiert, tmp_path):
     regen, temp, clim, merkmale, _ = trainiert
     args = {

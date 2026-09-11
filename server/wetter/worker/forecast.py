@@ -35,9 +35,17 @@ from wetter.models.registry import (
 
 log = logging.getLogger(__name__)
 
-#: Soviel Vorgeschichte braucht der Merkmalsbau: die längste Tendenz geht über
-#: 24 Stunden, dazu etwas Reserve für Lücken.
-HISTORY_HOURS = 72
+#: Soviel Vorgeschichte braucht der Merkmalsbau.
+#:
+#: Nicht die längste Tendenz (24 h) gibt das Mass vor, sondern das Merkmal
+#: "Stunden seit dem letzten Regen": es zählt bis 240 Stunden hoch. Lädt man nur
+#: 72 Stunden, kann es bei der Inferenz nie über 72 steigen, während es im Training
+#: bis 240 ging -- dasselbe Merkmal bedeutet dann auf beiden Seiten etwas anderes.
+#: Und gerade dieses Merkmal trägt beim Regenmodell am meisten bei.
+#:
+#: 336 Stunden sind zwei Wochen: genug für den Deckel bei 240 plus Reserve für
+#: Messlücken, und immer noch eine Abfrage, die in Millisekunden zurückkommt.
+HISTORY_HOURS = 336
 
 #: Spalten, die aus der Stundentabelle in den Merkmalsbau gehen.
 HOURLY_COLUMNS: tuple[str, ...] = (
