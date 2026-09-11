@@ -121,10 +121,18 @@ def wind_components(speed, direction_deg):
 
 
 def wind_direction(u, v):
-    """Umkehrung von :func:`wind_components` -- Richtung in Grad (0..360)."""
+    """Umkehrung von :func:`wind_components` -- Richtung in Grad, 0 <= d < 360.
+
+    Das Abfangen von exakt 360 ist kein Schoenheitsfehler: ``%`` liefert in
+    Fliesskomma sehr wohl 360, wenn der Eingabewert minimal negativ ist
+    (``-1e-15 % 360`` rundet auf 360.0 auf). Ein Vektormittel ueber den Nordpunkt
+    trifft genau diesen Fall, und eine Richtung von 360 Grad wuerde jede
+    Bereichspruefung und jede Sektorzuordnung dahinter aus dem Tritt bringen.
+    """
     uu = np.asarray(u, dtype=float)
     vv = np.asarray(v, dtype=float)
-    return np.degrees(np.arctan2(-uu, -vv)) % 360.0
+    grad = np.degrees(np.arctan2(-uu, -vv)) % 360.0
+    return np.where(grad >= 360.0 - 1e-9, 0.0, grad)
 
 
 def angular_difference(a_deg, b_deg):

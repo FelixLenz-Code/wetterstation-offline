@@ -182,6 +182,23 @@ def test_windrichtung_ist_umkehrung_der_komponenten():
         assert wind_direction(u, v) == pytest.approx(float(d), abs=1e-6)
 
 
+def test_windrichtung_gibt_nie_exakt_360_zurueck():
+    """Fliesskomma kann aus einem Hauch unter null glatte 360 machen.
+
+    Ein Vektormittel ueber den Nordpunkt trifft genau diesen Fall; 360 Grad wuerde
+    jede Bereichspruefung und Sektorzuordnung dahinter aus dem Tritt bringen.
+    """
+    # Wind aus Norden: der Vektor zeigt nach Sueden, also v negativ. Ein Hauch
+    # positives u laesst arctan2 minimal negativ werden -- genau der Fall.
+    assert wind_direction(1e-16, -5.0) == pytest.approx(0.0)
+    assert wind_direction(1e-15, -5.0) == pytest.approx(0.0)
+    assert wind_direction(0.0, -5.0) == pytest.approx(0.0)
+    rng = np.random.default_rng(1)
+    u, v = rng.normal(size=200), rng.normal(size=200)
+    grad = wind_direction(u, v)
+    assert np.all((grad >= 0.0) & (grad < 360.0))
+
+
 def test_winkeldifferenz_ueber_den_nulldurchgang():
     """350 Grad und 10 Grad liegen 20 Grad auseinander, nicht 340."""
     assert angular_difference(10.0, 350.0) == pytest.approx(20.0)
