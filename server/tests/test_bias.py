@@ -30,9 +30,18 @@ def _fit(eigene, referenz) -> QuantileMapping:
 
 @pytest.fixture
 def wahrheit() -> np.ndarray:
+    """Gut ein Jahr stündlicher Werte mit Tages- und Jahresgang.
+
+    Die Länge ist Absicht: erst ab MIN_SAMPLES_FULL nutzt die Anpassung die volle
+    Quantil-Abbildung. Kürzere Reihen prüft
+    :func:`test_kurze_reihe_ergibt_nur_einen_versatz` eigens.
+    """
+    n = 9000
     rng = np.random.default_rng(7)
-    t = np.arange(2000, dtype=float)
-    return 10.0 + 8.0 * np.sin(2 * np.pi * t / 24) + rng.normal(0, 1.5, 2000)
+    t = np.arange(n, dtype=float)
+    tagesgang = 8.0 * np.sin(2 * np.pi * t / 24)
+    jahresgang = 10.0 * np.sin(2 * np.pi * t / 8760)
+    return 10.0 + jahresgang + tagesgang + rng.normal(0, 1.5, n)
 
 
 def test_konstanter_versatz_wird_zurueckgerechnet(wahrheit):
@@ -82,11 +91,38 @@ def test_nur_gemeinsame_stunden_zaehlen(wahrheit):
     """Ein Ausfall der eigenen Station ist kein Verteilungsunterschied."""
     eigene = wahrheit + 1.5
     # Die erste Hälfte der eigenen Reihe fehlt -- und das war die kalte Jahreszeit.
-    eigene[:1000] = np.nan
+    haelfte = len(eigene) // 2
+    eigene[:haelfte] = np.nan
     abbildung = fit_mapping(reihe(eigene), reihe(wahrheit), column="temperature_c")
     assert abbildung is not None
-    assert abbildung.samples == 1000
+    assert abbildung.samples == len(eigene) - haelfte
     assert abbildung.median_shift == pytest.approx(-1.5, abs=0.2)
+
+
+def test_kurze_reihe_ergibt_nur_einen_versatz(wahrheit):
+    """Unter einem Jahr wird nur verschoben, nicht die Form verändert.
+
+    Eine Quantil-Abbildung, die auf zwei Sommermonaten angepasst wurde, hat nie
+    einen Frostwert gesehen und rechnet im Winter Werte zurecht, für die sie keine
+    Grundlage hat. Ein konstanter Versatz kann das nicht.
+    """
+    kurz = wahrheit[:1500]
+    abbildung = _fit(kurz + 0.8, kurz)
+    assert abbildung is not None
+    # Der Abstand zwischen den Stützstellen ist auf beiden Seiten gleich --
+    # das Kennzeichen einer reinen Verschiebung.
+    diff = abbildung.reference_quantiles - abbildung.own_quantiles
+    assert np.allclose(diff, diff[0], atol=1e-9)
+    assert diff[0] == pytest.approx(-0.8, abs=0.15)
+
+
+def test_lange_reihe_nutzt_die_volle_abbildung(wahrheit):
+    """Ab einem Jahr darf die Form angepasst werden."""
+    # Wertabhängige Verzerrung, die ein reiner Versatz nicht beheben könnte.
+    eigene = wahrheit + 0.2 * np.clip(wahrheit - 10.0, 0.0, None)
+    abbildung = _fit(eigene, wahrheit)
+    diff = abbildung.reference_quantiles - abbildung.own_quantiles
+    assert not np.allclose(diff, diff[0], atol=0.05)
 
 
 def test_zu_wenige_daten_ergeben_keine_korrektur():
@@ -164,8 +200,9 @@ def test_nicht_umkehrbare_abbildung_wird_abgelehnt():
     Quantilwerte.
     """
     rng = np.random.default_rng(2)
-    stufig = np.round(rng.uniform(0, 8, 2000))
-    stetig = rng.normal(4, 2, 2000)
+    n = 9000
+    stufig = np.round(rng.uniform(0, 8, n))
+    stetig = rng.normal(4, 2, n)
     assert fit_mapping(reihe(stetig), reihe(stufig), column="cloud_cover_okta") is None
 
 

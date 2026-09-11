@@ -159,6 +159,10 @@ def save_temp_model(
                 # das trainierte -- das Band fiele nach einem Neustart wieder
                 # zusammen.
                 "conformal_width": model.conformal_width,
+                # JSON kennt nur Zeichenketten als Schlüssel.
+                "conformal_by_month": {
+                    str(m): b for m, b in model.conformal_by_month.items()
+                },
             },
             indent=2,
         ),
@@ -243,6 +247,10 @@ def load_temp_model(session: Session, model_id: int) -> TempModel:
         feature_names=list(row.feature_names),
         metrics=dict(row.metrics or {}),
         conformal_width=float(meta.get("conformal_width", 0.0)),
+        conformal_by_month={
+            int(m): float(b)
+            for m, b in (meta.get("conformal_by_month") or {}).items()
+        },
     )
     _cache_put(model_id, modell)
     return modell

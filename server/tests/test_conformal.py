@@ -12,6 +12,7 @@ Aufweitung die versprochene Abdeckung wirklich herstellt.
 from __future__ import annotations
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from wetter.models.train import conformal_width
@@ -116,3 +117,53 @@ def test_endliche_korrektur_ist_konservativ():
         )
     # Im Mittel mindestens die Zusage, nicht darunter.
     assert float(np.mean(treffer)) >= 0.78
+
+
+def test_monatsweise_eichung_gleicht_die_jahreszeit_aus():
+    """Eine Zahl fürs ganze Jahr trifft die Zusage nur im Mittel.
+
+    Gemessen schwankt die Abdeckung eines jahresweit geeichten Bandes zwischen
+    68 Prozent im Juni und 85 Prozent im März -- der Sommer ist schwerer
+    vorherzusagen. Wer nur den Jahresdurchschnitt eicht, verspricht im Sommer zu
+    viel und im Frühjahr zu wenig.
+    """
+    rng = np.random.default_rng(31)
+    n = 12000
+    idx = pd.date_range("2024-01-01", periods=n, freq="h", tz="UTC")
+    mitte = rng.normal(10.0, 5.0, n)
+    # Im Sommer streut die Wahrheit doppelt so stark wie im Winter.
+    sommer = np.isin(idx.month, [6, 7, 8])
+    streuung = np.where(sommer, 3.0, 1.2)
+    y = mitte + rng.normal(0.0, 1.0, n) * streuung
+    unten, oben = mitte - 1.5, mitte + 1.5
+
+    jahr = conformal_width(unten, oben, y, coverage=0.8)
+    nach_monat = {
+        m: conformal_width(
+            unten[idx.month == m], oben[idx.month == m], y[idx.month == m],
+            coverage=0.8,
+        )
+        for m in range(1, 13)
+    }
+
+    # Die Sommerbreite muss deutlich über der Winterbreite liegen.
+    assert nach_monat[7] > nach_monat[1] * 1.5
+
+    def deckung(maske, breite):
+        return float(np.mean((y[maske] >= unten[maske] - breite)
+                             & (y[maske] <= oben[maske] + breite)))
+
+    # Mit einer Jahreszahl verfehlt der Sommer die Zusage deutlich.
+    assert deckung(sommer, jahr) < 0.72
+    # Monatsweise trifft er sie.
+    juli = idx.month == 7
+    assert deckung(juli, nach_monat[7]) == pytest.approx(0.8, abs=0.05)
+    januar = idx.month == 1
+    assert deckung(januar, nach_monat[1]) == pytest.approx(0.8, abs=0.05)
+
+
+def test_duenner_monat_faellt_auf_den_jahreswert_zurueck():
+    """Aus zwanzig Fällen lässt sich für einen Monat nichts eichen."""
+    from wetter.models.train import MIN_MONTH_SAMPLES
+
+    assert MIN_MONTH_SAMPLES >= 100

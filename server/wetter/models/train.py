@@ -34,6 +34,9 @@ from wetter.models.split import TimeSplit
 
 log = logging.getLogger(__name__)
 
+#: Soviele Fälle braucht ein Monat, damit für ihn eigens geeicht wird.
+MIN_MONTH_SAMPLES = 300
+
 #: Quantile der Temperaturvorhersage: unteres Band, Median, oberes Band.
 TEMP_QUANTILES: tuple[float, ...] = (0.1, 0.5, 0.9)
 
@@ -79,8 +82,17 @@ class TempModel:
     feature_names: list[str]
     metrics: dict[str, float] = field(default_factory=dict)
     conformal_width: float = 0.0
-    """Aufweitung des Bandes in Kelvin, damit es wirklich so oft trifft wie
-    versprochen. Siehe :func:`conformal_width`."""
+    """Aufweitung des Bandes in Kelvin über das ganze Jahr gemittelt."""
+
+    conformal_by_month: dict[int, float] = field(default_factory=dict)
+    """Aufweitung je Kalendermonat (1 bis 12).
+
+    Eine einzige Zahl fürs ganze Jahr trifft die Zusage nur im Mittel. Gemessen
+    schwankt die tatsächliche Abdeckung eines jahresweit geeichten Bandes zwischen
+    68 Prozent im Juni und 85 Prozent im März: der Sommer ist schwerer vorherzusagen,
+    das Band müsste dort breiter sein und im Frühjahr schmaler. Wer nur den
+    Jahresdurchschnitt eicht, verspricht im Sommer zu viel und im Frühjahr zu wenig.
+    """
 
     def predict(self, features: pd.DataFrame) -> dict[float, np.ndarray]:
         x = features[self.feature_names]
@@ -88,7 +100,9 @@ class TempModel:
             q: np.asarray(b.predict(x), dtype=float) for q, b in self.boosters.items()
         }
         sortiert = _sort_quantiles(roh)
-        if self.conformal_width <= 0.0:
+
+        breite = self._widths(features.index)
+        if not np.any(breite > 0.0):
             return sortiert
 
         # Nur die Bandgrenzen aufweiten, den Median nicht verschieben: er ist die
@@ -96,9 +110,24 @@ class TempModel:
         qs = sorted(sortiert)
         unten, oben = qs[0], qs[-1]
         out = dict(sortiert)
-        out[unten] = sortiert[unten] - self.conformal_width
-        out[oben] = sortiert[oben] + self.conformal_width
+        out[unten] = sortiert[unten] - breite
+        out[oben] = sortiert[oben] + breite
         return out
+
+    def _widths(self, index) -> np.ndarray:
+        """Aufweitung je Zeile, nach Monat aufgeschlüsselt."""
+        if not self.conformal_by_month:
+            return np.full(len(index), self.conformal_width)
+        monate = getattr(index, "month", None)
+        if monate is None:
+            return np.full(len(index), self.conformal_width)
+        return np.array(
+            [
+                self.conformal_by_month.get(int(m), self.conformal_width)
+                for m in monate
+            ],
+            dtype=float,
+        )
 
 
 def _sort_quantiles(werte: dict[float, np.ndarray]) -> dict[float, np.ndarray]:
@@ -256,10 +285,28 @@ def train_temp_model(
     roh = modell.predict(x_konf)
     breite = conformal_width(roh[qs[0]], roh[qs[-1]], y_konf, coverage=abdeckung)
     modell.conformal_width = breite
+
+    # Je Monat eigens eichen. Fällt ein Monat zu dünn aus, greift für ihn der
+    # Jahreswert -- besser eine gemittelte Zusage als eine aus zwanzig Fällen.
+    nach_monat: dict[int, float] = {}
+    monate = x_konf.index.month
+    for monat in range(1, 13):
+        maske = monate == monat
+        if maske.sum() < MIN_MONTH_SAMPLES:
+            continue
+        nach_monat[monat] = conformal_width(
+            roh[qs[0]][maske],
+            roh[qs[-1]][maske],
+            y_konf[maske],
+            coverage=abdeckung,
+        )
+    modell.conformal_by_month = nach_monat
+
     modell.metrics = {
         "conformal_width": breite,
         "conformal_samples": len(x_konf),
         "nominal_coverage": abdeckung,
+        "conformal_months": len(nach_monat),
     }
     if breite > 0:
         log.info(

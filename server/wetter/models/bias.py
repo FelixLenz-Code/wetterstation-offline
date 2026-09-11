@@ -31,10 +31,23 @@ log = logging.getLogger(__name__)
 #: bildet vor allem das Rauschen der Stichprobe ab.
 QUANTILES: tuple[float, ...] = tuple(np.round(np.arange(0.0, 1.001, 0.05), 3))
 
-#: Unter dieser Zahl gemeinsamer Stunden wird nicht korrigiert. Vier Wochen
+#: Unter dieser Zahl gemeinsamer Stunden wird gar nicht korrigiert. Vier Wochen
 #: stündlicher Daten sind rund 670 Stunden -- darunter beschreibt die Abbildung die
 #: Wetterlage dieser Wochen statt des Aufstellungsunterschieds.
 MIN_SAMPLES = 600
+
+#: Ab dieser Zahl gemeinsamer Stunden wird die volle Quantil-Abbildung genutzt,
+#: darunter nur ein konstanter Versatz.
+#:
+#: Der Grund ist die Jahreszeit. Eine Quantil-Abbildung verformt die Verteilung
+#: entlang ihrer ganzen Breite. Passt man sie auf zwei Sommermonaten an, hat sie
+#: nie einen Frostwert gesehen -- und rechnet im Winter Werte zurecht, für die sie
+#: keine Grundlage hat. Ein konstanter Versatz kann das nicht: er verschiebt, ohne
+#: die Form anzufassen, und liegt im schlimmsten Fall um den Betrag daneben, um den
+#: sich der Aufstellungsfehler über das Jahr ändert.
+#:
+#: 8000 Stunden sind knapp ein Jahr, also mindestens ein voller Jahresgang.
+MIN_SAMPLES_FULL = 8000
 
 
 @dataclass
@@ -148,6 +161,20 @@ def fit_mapping(
 
     eigene = np.quantile(gemeinsam["own"].to_numpy(), quantiles)
     referenz = np.quantile(gemeinsam["ref"].to_numpy(), quantiles)
+
+    if len(gemeinsam) < MIN_SAMPLES_FULL:
+        # Zu kurz für eine formverändernde Abbildung: nur verschieben. Der Median
+        # der Einzelabweichungen ist robuster als die Differenz der Mittelwerte --
+        # ein einzelner Ausreisser soll die Korrektur nicht mitziehen.
+        versatz = float(np.median(gemeinsam["ref"] - gemeinsam["own"]))
+        referenz = eigene + versatz
+        log.info(
+            "%s: nur %d gemeinsame Stunden -- konstanter Versatz %+.2f statt "
+            "voller Quantil-Abbildung",
+            column,
+            len(gemeinsam),
+            versatz,
+        )
 
     if not np.all(np.diff(eigene) > 0) or not np.all(np.diff(referenz) > 0):
         # np.interp braucht streng steigende Stützstellen -- und zwar auf *beiden*
