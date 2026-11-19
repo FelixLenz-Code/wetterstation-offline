@@ -68,7 +68,7 @@ vapid_schluessel() {
   # jede Warnung, damit der Push-Dienst des Browserherstellers sie annimmt.
   #
   # Erzeugt wird es im Web-Abbild, weil die Bibliothek dort ohnehin liegt.
-  docker run --rm node:20-slim sh -c \
+  docker run --rm node:24.22.3-slim sh -c \
     "npm install --silent --no-fund --no-audit web-push >/dev/null 2>&1 && \
      node -e \"const k=require('web-push').generateVAPIDKeys(); \
        console.log(k.publicKey+' '+k.privateKey)\"" 2>/dev/null
