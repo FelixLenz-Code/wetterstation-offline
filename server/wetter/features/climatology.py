@@ -108,7 +108,7 @@ class Climatology:
         if "temperature_c" not in frame.columns:
             raise ValueError("Klimatologie braucht mindestens temperature_c")
 
-        day = frame.index.dayofyear.to_numpy()
+        day = frame.index.day_of_year.to_numpy()
         hour = frame.index.hour.to_numpy()
         temp = frame["temperature_c"].to_numpy(dtype=float)
 
@@ -127,20 +127,20 @@ class Climatology:
         return cls(
             temp_mean=_cell_mean(temp, day, hour),
             temp_min=_daily_mean(
-                tages_min.to_numpy(dtype=float), tages_min.index.dayofyear.to_numpy()
+                tages_min.to_numpy(dtype=float), tages_min.index.day_of_year.to_numpy()
             ),
             temp_max=_daily_mean(
-                tages_max.to_numpy(dtype=float), tages_max.index.dayofyear.to_numpy()
+                tages_max.to_numpy(dtype=float), tages_max.index.day_of_year.to_numpy()
             ),
             rain_probability=_cell_mean(regen, day, hour),
             years=float(spanne),
         )
 
     def _lookup_2d(self, table: np.ndarray, index: pd.DatetimeIndex) -> np.ndarray:
-        return table[index.dayofyear.to_numpy() - 1, index.hour.to_numpy()]
+        return table[index.day_of_year.to_numpy() - 1, index.hour.to_numpy()]
 
     def _lookup_1d(self, table: np.ndarray, index: pd.DatetimeIndex) -> np.ndarray:
-        return table[index.dayofyear.to_numpy() - 1]
+        return table[index.day_of_year.to_numpy() - 1]
 
     def normal_temp(self, index: pd.DatetimeIndex) -> np.ndarray:
         """Normaltemperatur fuer Kalendertag *und* Tagesstunde."""

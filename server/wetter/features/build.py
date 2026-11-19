@@ -182,7 +182,7 @@ def build_features(
 
     # --- Zeit als stetige Groessen ---
     stunde = idx.hour.to_numpy(dtype=float) + idx.minute.to_numpy(dtype=float) / 60.0
-    tag = idx.dayofyear.to_numpy(dtype=float)
+    tag = idx.day_of_year.to_numpy(dtype=float)
     f["hour_sin"] = np.sin(2 * np.pi * stunde / 24.0)
     f["hour_cos"] = np.cos(2 * np.pi * stunde / 24.0)
     f["doy_sin"] = np.sin(2 * np.pi * tag / 365.25)

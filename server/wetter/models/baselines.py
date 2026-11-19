@@ -160,7 +160,7 @@ class ClimatologyBaseline(Baseline):
         """
         from wetter.features.climatology import _cell_mean
 
-        day = features.index.dayofyear.to_numpy()
+        day = features.index.day_of_year.to_numpy()
         hour = features.index.hour.to_numpy()
         for spalte in targets.columns:
             if not spalte.startswith("rain_next_"):
@@ -179,7 +179,7 @@ class ClimatologyBaseline(Baseline):
                 "ClimatologyBaseline.fit() muss vor predict_rain() laufen"
             )
         idx = features.index
-        return tabelle[idx.dayofyear.to_numpy() - 1, idx.hour.to_numpy()]
+        return tabelle[idx.day_of_year.to_numpy() - 1, idx.hour.to_numpy()]
 
     def predict_temp(self, features: pd.DataFrame, lead_hours: int) -> np.ndarray:
         ziel = features.index + pd.Timedelta(hours=lead_hours)

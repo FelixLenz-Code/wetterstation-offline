@@ -280,7 +280,7 @@ def solar_position(timestamps, latitude, longitude):
     Genauigkeit rund 0,1 Grad -- fuer Merkmale wie den Klarhimmel-Index reichlich.
     ``timestamps`` muss ein zeitzonenbewusster pandas-DatetimeIndex in UTC sein.
     """
-    day = timestamps.dayofyear.to_numpy(dtype=float)
+    day = timestamps.day_of_year.to_numpy(dtype=float)
     hour = (
         timestamps.hour.to_numpy(dtype=float)
         + timestamps.minute.to_numpy(dtype=float) / 60.0
